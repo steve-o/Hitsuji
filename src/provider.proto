@@ -1,0 +1,33 @@
+option optimize_for = LITE_RUNTIME;
+
+package provider;
+
+message Request {
+	enum MsgType {
+		MSG_ABORT = 0;
+		MSG_SNAPSHOT = 1;
+		MSG_SUBSCRIPTION = 2;
+		MSG_REFRESH = 3;
+	}
+	required MsgType msg_type = 1;
+	optional group Refresh = 2 {
+		required uint64 token = 3;
+		required uint32 service_id = 4;
+		required uint32 model_type = 5;
+		required string item_name = 6;
+		required uint32 rwf_major_version = 7;
+		required uint32 rwf_minor_version = 8;
+	}
+}
+
+message Response {
+	enum MsgType {
+		MSG_SNAPSHOT = 0;
+		MSG_INITIAL = 1;
+		MSG_UPDATE = 2;
+		MSG_REFRESH = 3;
+	}
+	required MsgType msg_type = 1;
+	required uint64 token = 2;
+	required bytes encoded_buffer = 3;
+}

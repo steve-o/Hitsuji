@@ -1,0 +1,33 @@
+{
+// SNMP implant settings.
+
+   "is_snmp_enabled":true,
+
+// Subagent in Net-SNMP terminology means that this implant will connect to a separate
+// running agent, i.e. snmpd.exe.  Will not interoperate with Microsoft snmp.exe
+
+   "is_agentx_subagent":true,
+
+// TREP-VA by default configures snmpd to listen to tcp:<hostname>:705 instead of
+// tcp:localhost:705 for subagent connectivity.
+
+   "agentx_socket":"tcp:localhost:705",
+
+// RSSL to TREP-RT connectivity settings.
+
+   "service_name":"VTA",
+
+   "rssl_port": 14002,
+
+   "vendor_name":"Thomson Reuters",
+
+   "maximum_data_size": 8192,
+
+   "session_capacity": 2,
+
+// Analytics platform settings.
+
+   "worker_count": 1,
+
+   "symbol_map": "C:/Vhayu/Config/symbolmap.txt"
+}

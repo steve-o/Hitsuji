@@ -1,0 +1,67 @@
+<?xml version="1.0"?>
+<!-- Hitsuji.xml
+
+     Velocity Analytics Engine plugin configuration file.
+
+     Notice:
+       * All XML elements must have a closing tag.
+       * XML tags are case sensitive.
+       * XML elements must be properly nested.
+       * XML attribute values must be quoted.
+       * Comments may appear anywhere in a document outside other markup.
+       * The string (double-hyphen) must not occur within comments.
+
+
+  -->
+<PluginFrameworkModule id="Hitsuji">
+
+<!-- Absolute path of plugin library -->
+	<Lib id="HitsujiLib" path="C:/Vhayu/Engine/Bin64/Hitsuji.dll"/>
+
+<!-- Velocity boiler plate -->
+	<UserPlugin id="HitsujiPlugin" type="HitsujiPlugin">
+
+<config>
+
+<!-- SNMP implant settings, uncomment node to enable.  Subagent in Net-SNMP terminology
+     means that this implant will connect to a separate running agent, i.e. snmpd.exe.
+
+     Optional filelog attribute for a somewhat insubstancial Net-SNMP output, e.g.
+
+	<Snmp filelog="/snmp.log">
+        ...
+        </Snmp>
+
+     NB:  Net-SNMP subagents are incompatible with Microsoft's SNMP daemon.
+
+     NB:  TREP-VA by default configures snmpd to listen to tcp:<hostname>:705 instead of
+          tcp:localhost:705 for subagent connectivity.
+
+  -->
+<!--	<Snmp>
+		<agentX subagent="true"
+			socket="tcp:localhost:705"/>
+	</Snmp> -->
+
+<!-- RSSL to TREP-RT connectivity settings.
+  -->
+	<Rssl
+		serviceName="VTA"
+		port="14002"
+		vendorName="Thomson Reuters"
+		maximumDataSize="8192"
+		sessionCapacity="2">
+	</Rssl>
+
+<!-- Analytics platform settings.
+  -->
+	<Hitsuji
+		workerCount="1"
+		symbolmap="C:/Vhayu/Config/symbolmap.txt">
+	</Hitsuji>
+
+</config>
+
+	</UserPlugin>
+
+</PluginFrameworkModule>

@@ -1,0 +1,1093 @@
+----------------------------------------------------------------
+--
+-- Analytics platform (Hitsuji) MIB
+--
+----------------------------------------------------------------
+
+HITSUJI-MIB DEFINITIONS ::= BEGIN
+
+-- IMPORTS: Include definitions from other mibs here, which is always
+-- the first item in a MIB file.
+IMPORTS
+        enterprises, OBJECT-TYPE, Counter32, MODULE-IDENTITY
+                FROM SNMPv2-SMI;
+
+--
+-- A brief description and update information about this mib.
+--
+hitsujiMIB MODULE-IDENTITY
+	LAST-UPDATED "201208310000Z"
+	ORGANIZATION
+		"Thomson Reuters"
+	CONTACT-INFO
+		"Steven McCoy
+		steven.mccoy@thomsonreuters.com
+		+1 646-223-8624
+		Thomson Reuters
+		3 Times Square
+		New York, NY 10036
+		USA"
+	DESCRIPTION
+		"The MIB module for managing Hitsuji analytics."
+	REVISION "201208310000Z"
+	DESCRIPTION
+		"Version 0.0: Initial MIB."
+	::= { enterprises 67 }
+	
+
+-- Define typical mib nodes, like where the objects are going to lie.
+-- we'll prefix everything in this mib with hitsuji
+hitsuji OBJECT IDENTIFIER ::= { hitsujiMIB 3 }
+hitsujiPlugin OBJECT IDENTIFIER ::= { hitsuji 2 }
+
+hitsujiPluginNumberOfEntries OBJECT-TYPE
+	SYNTAX     Unsigned32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of hitsuji plugin instances."
+	::= { hitsujiPlugin 1 }
+
+PluginId ::= TEXTUAL-CONVENTION
+	DISPLAY-HINT "255a"
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Plugin identifier, as configured in xml tree."
+	SYNTAX     OCTET STRING (SIZE (1..255))
+
+-- Plugin Management Table
+
+hitsujiPluginTable OBJECT-TYPE
+	SYNTAX SEQUENCE OF hitsujiPluginEntry
+	MAX-ACCESS not-accessible
+        STATUS     current
+	DESCRIPTION
+		"The table holding per plugin instance information."
+	::= { hitsujiPlugin 2 }
+
+hitsujiPluginEntry OBJECT-TYPE
+	SYNTAX     hitsujiPluginEntry
+	MAX-ACCESS not-accessible
+	STATUS     current
+	DESCRIPTION
+		"Per plugin instance information."
+	INDEX    { hitsujiPluginId }
+	::= { hitsujiPluginTable 1 }
+
+hitsujiPluginEntry ::= SEQUENCE {
+	hitsujiPluginId
+		PluginId,
+	hitsujiPluginWindowsRegistryKey
+		OCTET STRING,
+	hitsujiPluginServiceName
+		OCTET STRING,
+	hitsujiPluginMonitorName 
+		OCTET STRING,
+	hitsujiPluginEventQueueName 
+		OCTET STRING,
+	hitsujiPluginVendorName 
+		OCTET STRING,
+	hitsujiPluginMaximumDataSize
+		Unsigned32,
+	hitsujiPluginSessionCapacity
+		Unsigned32,
+	hitsujiPluginWorkerCount
+		Unsigned32,
+	hitsujiPluginRicSuffix 
+		OCTET STRING,
+	hitsujiPluginDefaultTimezone
+		OCTET STRING,
+	hitsujiPluginTimezoneDatabase
+		OCTET STRING,
+	hitsujiPluginDefaultDayCount
+		Unsigned32
+	}
+
+hitsujiPluginId OBJECT-TYPE
+	SYNTAX     PluginId
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Plugin identifier, as configured in xml tree."
+	::= { hitsujiPluginEntry 1 }
+
+hitsujiPluginWindowsRegistryKey OBJECT-TYPE
+	SYNTAX     OCTET STRING (SIZE (1..255))
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Windows registry override key."
+	::= { hitsujiPluginEntry 2 }
+
+hitsujiPluginServiceName OBJECT-TYPE
+	SYNTAX     OCTET STRING (SIZE (1..255))
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"TREP-RT service name."
+	::= { hitsujiPluginEntry 3 }
+
+hitsujiPluginMonitorName OBJECT-TYPE
+	SYNTAX     OCTET STRING (SIZE (1..255))
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"RFA application logger monitor name."
+	::= { hitsujiPluginEntry 4 }
+
+hitsujiPluginEventQueueName OBJECT-TYPE
+	SYNTAX     OCTET STRING (SIZE (1..255))
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"RFA event queue name."
+	::= { hitsujiPluginEntry 5 }
+
+hitsujiPluginVendorName OBJECT-TYPE
+	SYNTAX     OCTET STRING (SIZE (1..255))
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"RFA vendor name."
+	::= { hitsujiPluginEntry 6 }
+
+hitsujiPluginMaximumDataSize OBJECT-TYPE
+	SYNTAX     Unsigned32
+	UNITS      "bytes"
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"RFA single write iterator pre-allocate size."
+	::= { hitsujiPluginEntry 7 }
+
+hitsujiPluginSessionCapacity OBJECT-TYPE
+	SYNTAX     Unsigned32
+	UNITS      "sessions"
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Maximum number of concurrent sessions."
+	::= { hitsujiPluginEntry 8 }
+
+hitsujiPluginWorkerCount OBJECT-TYPE
+	SYNTAX     Unsigned32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Count of concurrent workers."
+	::= { hitsujiPluginEntry 9 }
+
+hitsujiPluginRicSuffix OBJECT-TYPE
+	SYNTAX     OCTET STRING (SIZE (1..255))
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Fixed suffix for published RICs."
+	::= { hitsujiPluginEntry 10 }
+
+hitsujiPluginDefaultTimezone OBJECT-TYPE
+	SYNTAX     OCTET STRING (SIZE (1..255))
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Default time zone for unspecified requests."
+	::= { hitsujiPluginEntry 11 }
+
+hitsujiPluginTimezoneDatabase OBJECT-TYPE
+	SYNTAX     OCTET STRING (SIZE (1..255))
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"File path for Boost::DateTime time zone database."
+	::= { hitsujiPluginEntry 12 }
+
+hitsujiPluginDefaultDayCount OBJECT-TYPE
+	SYNTAX     Unsigned32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Default bin length in days."
+	::= { hitsujiPluginEntry 13 }
+
+-- Plugin Performance Management Table
+
+hitsujiPerformanceTable OBJECT-TYPE
+	SYNTAX SEQUENCE OF hitsujiPerformanceEntry
+	MAX-ACCESS not-accessible
+        STATUS     current
+	DESCRIPTION
+		"The table holding per plugin instance performance information."
+	::= { hitsujiPlugin 4 }
+
+hitsujiPerformanceEntry OBJECT-TYPE
+	SYNTAX     hitsujiPerformanceEntry
+	MAX-ACCESS not-accessible
+	STATUS     current
+	DESCRIPTION
+		"Per plugin instance performance information."
+	INDEX    { hitsujiPerformancePluginId }
+	::= { hitsujiPerformanceTable 1 }
+
+hitsujiPerformanceEntry ::= SEQUENCE {
+	hitsujiPerformancePluginId
+		PluginId,
+	hitsujiTclQueryReceived
+		Counter32,
+	hitsujiTimerQueryReceived
+		Counter32,
+	hitsujiLastActivity
+		Counter32,
+	hitsujiTclSvcTimeMin
+		Counter32,
+	hitsujiTclSvcTimeMean
+		Counter32,
+	hitsujiTclSvcTimeMax
+		Counter32,
+	hitsujiTimerSvcTimeMin
+		Counter32,
+	hitsujiTimerSvcTimeMean
+		Counter32,
+	hitsujiTimerSvcTimeMax,
+		Counter32,
+	hitsujiMsgsSent
+		Counter32,
+	hitsujiLastMsgSent
+		Counter32
+	}
+
+hitsujiPerformancePluginId OBJECT-TYPE
+	SYNTAX     PluginId
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Plugin identifier, as configured in xml tree."
+	::= { hitsujiPerformanceEntry 1 }
+
+hitsujiTclQueryReceived OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of Tcl queries received."
+	::= { hitsujiPerformanceEntry 2 }
+
+hitsujiTimerQueryReceived OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of timer based queries received."
+	::= { hitsujiPerformanceEntry 3 }
+
+hitsujiLastActivity OBJECT-TYPE
+	SYNTAX     Counter32
+	UNITS      "seconds"
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Last time activity was observed.  In seconds since the epoch, January 1, 1970."
+	::= { hitsujiPerformanceEntry 4 }
+
+hitsujiTclSvcTimeMin OBJECT-TYPE
+	SYNTAX     Counter32
+	UNITS      "milliseconds"
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"The minimum time it took to resolve a Tcl query."
+	::= { hitsujiPerformanceEntry 5 }
+
+hitsujiTclSvcTimeMean OBJECT-TYPE
+	SYNTAX     Counter32
+	UNITS      "milliseconds"
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"The mean time it took to resolve a Tcl query."
+	::= { hitsujiPerformanceEntry 6 }
+
+hitsujiTclSvcTimeMax OBJECT-TYPE
+	SYNTAX     Counter32
+	UNITS      "milliseconds"
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"The maximum time it took to resolve a Tcl query."
+	::= { hitsujiPerformanceEntry 7 }
+
+hitsujiTimerSvcTimeMin OBJECT-TYPE
+	SYNTAX     Counter32
+	UNITS      "milliseconds"
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"The minimum time it took to resolve a timer query."
+	::= { hitsujiPerformanceEntry 8 }
+
+hitsujiTimerSvcTimeMean OBJECT-TYPE
+	SYNTAX     Counter32
+	UNITS      "milliseconds"
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"The mean time it took to resolve a timer query."
+	::= { hitsujiPerformanceEntry 9 }
+
+hitsujiTimerSvcTimeMax OBJECT-TYPE
+	SYNTAX     Counter32
+	UNITS      "milliseconds"
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"The maximum time it took to resolve a timer query."
+	::= { hitsujiPerformanceEntry 10 }
+
+hitsujiMsgsSent OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of messages sent by this provider."
+	::= { hitsujiPerformanceEntry 11 }
+
+hitsujiLastMsgSent OBJECT-TYPE
+	SYNTAX     Counter32
+	UNITS      "seconds"
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Last time a RFA message was sent.  In seconds since the epoch, January 1, 1970."
+	::= { hitsujiPerformanceEntry 12 }
+
+-- Client Management Table
+
+hitsujiClientTable OBJECT-TYPE
+	SYNTAX SEQUENCE OF hitsujiClientEntry
+	MAX-ACCESS not-accessible
+        STATUS     current
+	DESCRIPTION
+		"The table holding per client session information."
+	::= { hitsujiPlugin 5 }
+
+hitsujiClientEntry OBJECT-TYPE
+	SYNTAX     hitsujiClientEntry
+	MAX-ACCESS not-accessible
+	STATUS     current
+	DESCRIPTION
+		"Per client session instance information."
+	INDEX    { hitsujiClientPluginId,
+	           hitsujiClientHandle }
+	::= { hitsujiClientTable 1 }
+
+hitsujiClientEntry ::= SEQUENCE {
+	hitsujiClientPluginId
+		PluginId,
+	hitsujiClientHandle
+		OCTET STRING,
+	hitsujiClientLoginName
+		OCTET STRING,
+	hitsujiClientIpAddress
+		OCTET STRING,
+	hitsujiClientRsslPort 
+		OCTET STRING,
+	hitsujiClientSessionName 
+		OCTET STRING,
+	hitsujiClientConnectionName 
+		OCTET STRING,
+	hitsujiClientPublisherName 
+		OCTET STRING
+	}
+
+hitsujiClientPluginId OBJECT-TYPE
+	SYNTAX     PluginId
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Plugin identifier, as configured in xml tree."
+	::= { hitsujiClientEntry 1 }
+
+hitsujiClientHandle OBJECT-TYPE
+	SYNTAX     OCTET STRING (SIZE (1..255))
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Client session handle for this client."
+	::= { hitsujiClientEntry 2 }
+
+hitsujiClientLoginName OBJECT-TYPE
+	SYNTAX     OCTET STRING (SIZE (1..255))
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Client username, only set after MMT_LOGIN is received."
+	::= { hitsujiClientEntry 3 }
+
+hitsujiClientIpAddress OBJECT-TYPE
+	SYNTAX     OCTET STRING (SIZE (1..255))
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Client source IP address."
+	::= { hitsujiClientEntry 4 }
+
+hitsujiClientRsslPort OBJECT-TYPE
+	SYNTAX     OCTET STRING (SIZE (1..255))
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Listening RSSL IP port."
+	::= { hitsujiClientEntry 5 }
+
+hitsujiClientSessionName OBJECT-TYPE
+	SYNTAX     OCTET STRING (SIZE (1..255))
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"RFA session name."
+	::= { hitsujiClientEntry 6 }
+
+hitsujiClientConnectionName OBJECT-TYPE
+	SYNTAX     OCTET STRING (SIZE (1..255))
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"RFA connection name."
+	::= { hitsujiClientEntry 7 }
+
+hitsujiClientPublisherName OBJECT-TYPE
+	SYNTAX     OCTET STRING (SIZE (1..255))
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"RFA publisher name."
+	::= { hitsujiClientEntry 8 }
+
+-- Session Performance Management Table
+
+hitsujiClientPerformanceTable OBJECT-TYPE
+	SYNTAX SEQUENCE OF hitsujiClientPerformanceEntry
+	MAX-ACCESS not-accessible
+        STATUS     current
+	DESCRIPTION
+		"The table holding per client session instance performance information."
+	::= { hitsujiPlugin 6 }
+
+hitsujiClientPerformanceEntry OBJECT-TYPE
+	SYNTAX     hitsujiClientPerformanceEntry
+	MAX-ACCESS not-accessible
+	STATUS     current
+	DESCRIPTION
+		"Per client session instance performance information."
+	INDEX    { hitsujiClientPerformancePluginId,
+	           hitsujiClientPerformanceHandle }
+	::= { hitsujiClientPerformanceTable 1 }
+
+hitsujiClientPerformanceEntry ::= SEQUENCE {
+	hitsujiClientPerformancePluginId
+		PluginId,
+	hitsujiClientPerformanceHandle
+		OCTET STRING,
+	hitsujiClientLastActivity
+		Counter32,
+	hitsujiClientRfaMsgsSent
+		Counter32,
+	hitsujiRfaEventsReceived
+		Counter32,
+	hitsujiRfaEventsDiscarded
+		Counter32,
+	hitsujiOmmSolicitedItemEventsReceived
+		Counter32,
+	hitsujiOmmSolicitedItemEventsDiscarded
+		Counter32,
+	hitsujiRequestMsgsReceived
+		Counter32,
+	hitsujiRequestMsgsDiscarded
+		COunter32,
+	hitsujiMmtLoginReceived
+		Counter32,
+	hitsujiMmtLoginValidated
+		Counter32,
+	hitsujiMmtLoginMalformed
+		Counter32,
+	hitsujiMmtLoginRejected
+		Counter32,
+	hitsujiMmtLoginAccepted
+		Counter32,
+	hitsujiMmtLoginResponseValidated
+		Counter32,
+	hitsujiMmtLoginResponseMalformed
+		Counter32,
+	hitsujiMmtLoginException
+		Counter32,
+	hitsujiMmtDirectoryRequestReceived
+		Counter32,
+	hitsujiMmtDirectoryRequestValidated
+		Counter32,
+	hitsujiMmtDirectoryRequestMalformed
+		Counter32,
+	hitsujiMmtDirectoryValidated
+		Counter32,
+	hitsujiMmtDirectoryMalformed
+		Counter32,
+	hitsujiMmtDirectorySent
+		Counter32,
+	hitsujiMmtDirectoryException
+		Counter32,
+	hitsujiMmtDictionaryRequestReceived
+		Counter32,
+	hitsujiMmtDictionaryRequestValidated
+		Counter32,
+	hitsujiMmtDictionaryRequestMalformed
+		Counter32,
+	hitsujiItemRequestReceived
+		Counter32,
+	hitsujiItemReissueRequestReceived
+		Counter32,
+	hitsujiItemCloseRequestReceived
+		Counter32,
+	hitsujiItemRequestMalformed
+		Counter32,
+	hitsujiItemRequestBeforeLogin
+		Counter32,
+	hitsujiItemDuplicateSnapshot
+		Counter32,
+	hitsujiItemRequestDiscarded
+		Counter32,
+	hitsujiItemRequestRejected
+		Counter32,
+	hitsujiItemValidated
+		Counter32,
+	hitsujiItemMalformed
+		Counter32,
+	hitsujiItemNotFound
+		Counter32,
+	hitsujiItemSent
+		Counter32,
+	hitsujiItemClosed
+		Counter32,
+	hitsujiItemException
+		Counter32,
+	hitsujiOmmInactiveClientSessionReceived
+		Counter32,
+	hitsujiOmmInactiveClientSessionException
+		Counter32
+	}
+
+hitsujiClientPerformancePluginId OBJECT-TYPE
+	SYNTAX     PluginId
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Plugin identifier, as configured in xml tree."
+	::= { hitsujiClientPerformanceEntry 1 }
+
+hitsujiClientPerformanceHandle OBJECT-TYPE
+	SYNTAX     OCTET STRING (SIZE (1..255))
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Unique instance identifier for this client session."
+	::= { hitsujiClientPerformanceEntry 2 }
+
+hitsujiClientLastActivity OBJECT-TYPE
+	SYNTAX     Counter32
+	UNITS      "seconds"
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Last time activity was observed.  In seconds since the epoch, January 1, 1970."
+	::= { hitsujiClientPerformanceEntry 3 }
+
+hitsujiClientRfaMsgsSent OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of RFA messages sent to this client."
+	::= { hitsujiClientPerformanceEntry 4 }
+
+hitsujiRfaEventsReceived OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of RFA events received for this client."
+	::= { hitsujiClientPerformanceEntry 5 }
+
+hitsujiRfaEventsDiscarded OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of RFA events discarded for this client."
+	::= { hitsujiClientPerformanceEntry 6 }
+
+hitsujiOmmSolicitedItemEventsReceived OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of OMM Soliticed Item events received for this client."
+	::= { hitsujiClientPerformanceEntry 7 }
+
+hitsujiOmmSolicitedItemEventsDiscarded OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of OMM Soliticed Item events discarded for this client."
+	::= { hitsujiClientPerformanceEntry 8 }
+
+hitsujiRequestMsgsReceived OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of Request messages received from this client."
+	::= { hitsujiClientPerformanceEntry 9 }
+
+hitsujiRequestMsgsDiscarded OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of Request messages discarded from this client."
+	::= { hitsujiClientPerformanceEntry 10 }
+
+hitsujiMmtLoginReceived OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of MMT_LOGIN requests received from this client."
+	::= { hitsujiClientPerformanceEntry 11 }
+
+hitsujiMmtLoginValidated OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of MMT_LOGIN requests validated from this client."
+	::= { hitsujiClientPerformanceEntry 12 }
+
+hitsujiMmtLoginMalformed OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of MMT_LOGIN requests malformed from this client."
+	::= { hitsujiClientPerformanceEntry 13 }
+
+hitsujiMmtLoginRejected OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of MMT_LOGIN requests rejected from this client."
+	::= { hitsujiClientPerformanceEntry 14 }
+
+hitsujiMmtLoginAccepted OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of MMT_LOGIN requests accepted from this client."
+	::= { hitsujiClientPerformanceEntry 15 }
+
+hitsujiMmtLoginResponseValidated OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of MMT_LOGIN responses validated for this client."
+	::= { hitsujiClientPerformanceEntry 16 }
+
+hitsujiMmtLoginResponseMalformed OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of MMT_LOGIN responses malformed for this client."
+	::= { hitsujiClientPerformanceEntry 17 }
+
+hitsujiMmtLoginException OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of MMT_LOGIN exceptions caught for this client."
+	::= { hitsujiClientPerformanceEntry 18 }
+
+hitsujiMmtDirectoryRequestReceived OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of MMT_DIRECTORY requests received from this client."
+	::= { hitsujiClientPerformanceEntry 19 }
+
+hitsujiMmtDirectoryRequestValidated OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of MMT_DIRECTORY requests validated from this client."
+	::= { hitsujiClientPerformanceEntry 20 }
+
+hitsujiMmtDirectoryRequestMalformed OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of MMT_DIRECTORY requests malformed from this client."
+	::= { hitsujiClientPerformanceEntry 21 }
+
+hitsujiMmtDirectoryValidated OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of MMT_DIRECTORY's validated for this client."
+	::= { hitsujiClientPerformanceEntry 22 }
+
+hitsujiMmtDirectoryMalformed OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of MMT_DIRECTORY's malformed for this client."
+	::= { hitsujiClientPerformanceEntry 23 }
+
+hitsujiMmtDirectorySent OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of MMT_DIRECTORY's sent to this client."
+	::= { hitsujiClientPerformanceEntry 24 }
+
+hitsujiMmtDirectoryException OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of MMT_DIRECTORY exceptions caught for this client."
+	::= { hitsujiClientPerformanceEntry 25 }
+
+hitsujiMmtDictionaryRequestReceived OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of MMT_DICTIONARY requests received from this client."
+	::= { hitsujiClientPerformanceEntry 26 }
+
+hitsujiMmtDictionaryRequestValidated OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of MMT_DICTIONARY requests validated from this client."
+	::= { hitsujiClientPerformanceEntry 27 }
+
+hitsujiMmtDictionaryRequestMalformed OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of MMT_DICTIONARY requests malformed from this client."
+	::= { hitsujiClientPerformanceEntry 28 }
+
+hitsujiItemRequestReceived OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of item requests received from this client."
+	::= { hitsujiClientPerformanceEntry 29 }
+
+hitsujiItemReissueRequestReceived OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of item re-issue requests received from this client."
+	::= { hitsujiClientPerformanceEntry 30 }
+
+hitsujiItemCloseRequestReceived OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of item close requests received from this client."
+	::= { hitsujiClientPerformanceEntry 31 }
+
+hitsujiItemRequestMalformed OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of item requests malformed from this client."
+	::= { hitsujiClientPerformanceEntry 32 }
+
+hitsujiItemRequestBeforeLogin OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of item requests received illegally before login from this client."
+	::= { hitsujiClientPerformanceEntry 33 }
+
+hitsujiItemDuplicateSnapshot OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of duplicate item snapshot requests from this client.  Should always be zero."
+	::= { hitsujiClientPerformanceEntry 34 }
+
+hitsujiItemRequestDiscarded OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of item requests discarded from this client."
+	::= { hitsujiClientPerformanceEntry 35 }
+
+hitsujiItemRequestRejected OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of item requests rejected from this client."
+	::= { hitsujiClientPerformanceEntry 36 }
+
+hitsujiItemValidated OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of items validated for this client."
+	::= { hitsujiClientPerformanceEntry 37 }
+
+hitsujiItemMalformed OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of items malformed for this client."
+	::= { hitsujiClientPerformanceEntry 38 }
+
+hitsujiItemNotFound OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of unknown item requests from this client."
+	::= { hitsujiClientPerformanceEntry 39 }
+
+hitsujiItemSent OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of items sent to this client."
+	::= { hitsujiClientPerformanceEntry 40 }
+
+hitsujiItemClosed OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of items closed to this client."
+	::= { hitsujiClientPerformanceEntry 41 }
+
+hitsujiItemException OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of item exceptions caught for this client."
+	::= { hitsujiClientPerformanceEntry 42 }
+
+hitsujiOmmInactiveClientSessionReceived OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of OMM inactive client sessions received from this client."
+	::= { hitsujiClientPerformanceEntry 43 }
+
+hitsujiOmmInactiveClientSessionException OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of OMM inactive client session exceptions caught for this client."
+	::= { hitsujiClientPerformanceEntry 44 }
+
+-- Outage Measurement Metrics Table
+
+hitsujiOutageMeasurementTable OBJECT-TYPE
+	SYNTAX SEQUENCE OF hitsujiOutageMeasurementEntry
+	MAX-ACCESS not-accessible
+        STATUS     current
+	DESCRIPTION
+		"The table holding outage measurement metrics for assigned clients."
+	::= { hitsujiPlugin 7 }
+
+hitsujiOutageMeasurementEntry OBJECT-TYPE
+	SYNTAX     hitsujiOutageMeasurementEntry
+	MAX-ACCESS not-accessible
+	STATUS     current
+	DESCRIPTION
+		"Per client outage measurement metric information."
+	INDEX    { hitsujiOutageMeasurementPluginId,
+	           hitsujiOutageMeasurementClientName }
+	::= { hitsujiOutageMeasurementTable 1 }
+
+hitsujiOutageMeasurementEntry ::= SEQUENCE {
+	hitsujiOutageMeasurementPluginId
+		PluginId,
+	hitsujiOutageMeasurementClientName
+		OCTET STRING,
+	hitsujiAccumulatedOutageTime
+		Counter32,
+	hitsujiAccumulatedFailures
+		Counter32,
+	hitsujiRecordingStartTime
+		Counter32
+	}
+
+hitsujiOutageMeasurementPluginId OBJECT-TYPE
+	SYNTAX     PluginId
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Plugin identifier, as configured in xml tree."
+	::= { hitsujiOutageMeasurementEntry 1 }
+
+hitsujiOutageMeasurementClientName OBJECT-TYPE
+	SYNTAX     OCTET STRING (SIZE (1..255))
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Client username."
+	::= { hitsujiOutageMeasurementEntry 2 }
+
+hitsujiAccumulatedOutageTime OBJECT-TYPE
+	SYNTAX     Counter32
+	UNITS      "seconds"
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Accumulated Outage Time (AOT) since measurement started."
+	::= { hitsujiOutageMeasurementEntry 3 }
+
+hitsujiAccumulatedFailures OBJECT-TYPE
+	SYNTAX     Counter32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Number of Accumulated Failures (NAF) since measurement started."
+	::= { hitsujiOutageMeasurementEntry 4 }
+
+hitsujiRecordingStartTime OBJECT-TYPE
+	SYNTAX     Counter32
+	UNITS      "seconds"
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Recording Start Time (RST) in seconds since the Unix epoch."
+	::= { hitsujiClientOutageOnLineEntry 5 }
+
+-- Outage Event Characterization Table
+
+hitsujiOutageEventTable OBJECT-TYPE
+	SYNTAX SEQUENCE OF hitsujiOutageEventEntry
+	MAX-ACCESS not-accessible
+        STATUS     current
+	DESCRIPTION
+		"The table holding reocrded state changes of monitored clients."
+	::= { hitsujiPlugin 8 }
+
+hitsujiOutageEventEntry OBJECT-TYPE
+	SYNTAX     hitsujiOutageEventEntry
+	MAX-ACCESS not-accessible
+	STATUS     current
+	DESCRIPTION
+		"Per outage event information."
+	INDEX    { hitsujiOutageEventPluginId,
+		       hitsujiOutageEventId }
+	::= { hitsujiOutageEventTable 1 }
+
+hitsujiOutageEventEntry ::= SEQUENCE {
+	hitsujiOutageEventPluginId
+		PluginId,
+	hitsujiOutageEventId
+		Unsigned32,
+	hitsujiOutageClientName
+		OCTET STRING,
+	hitsujiOutageStartTime
+		Counter32,
+	hitsujiOutageEndTime
+		Counter32
+	hitsujiOutageState
+		INTEGER
+	}
+
+hitsujiOutageEventPluginId OBJECT-TYPE
+	SYNTAX     PluginId
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Plugin identifier, as configured in xml tree."
+	::= { hitsujiOutageEventEntry 1 }
+
+hitsujiOutageEventId OBJECT-TYPE
+	SYNTAX     Unsigned32
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Unique identifier for this event."
+	::= { hitsujiOutageEventEntry 2 }
+
+hitsujiOutageClientName OBJECT-TYPE
+	SYNTAX     OCTET STRING (SIZE (1..255))
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Client username."
+	::= { hitsujiOutageEventEntry 3 }
+
+hitsujiOutageStartTime OBJECT-TYPE
+	SYNTAX     Counter32
+	UNITS      "seconds"
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Time when the outage is first detected."
+	::= { hitsujiOutageEventEntry 4 }
+
+hitsujiOutageEndTime OBJECT-TYPE
+	SYNTAX     Counter32
+	UNITS      "seconds"
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Time when the outage ends."
+	::= { hitsujiOutageEventEntry 5 }
+
+hitsujiOutageStatus OBJECT-TYPE
+	SYNTAX     INTEGER {
+			up (1),
+			down (2)
+		   }
+	MAX-ACCESS read-only
+	STATUS     current
+	DESCRIPTION
+		"Status of service during recorded time period."
+	::= { hitsujiOutageEventEntry 6 }
+
+END

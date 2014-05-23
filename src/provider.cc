@@ -80,7 +80,7 @@ hitsuji::provider_t::Init()
 
 /* 9.4.1. Bind server socket. */
 	VLOG(3) << "Binding RSSL server socket.";
-	addr.serviceName             = const_cast<char*> (config_.rssl_default_port.c_str());	// port or service name
+	addr.serviceName             = const_cast<char*> (config_.rssl_port.c_str());	// port or service name
 	addr.protocolType	     = RSSL_RWF_PROTOCOL_TYPE;
 	addr.majorVersion	     = RSSL_RWF_MAJOR_VERSION;
 	addr.minorVersion	     = RSSL_RWF_MINOR_VERSION;

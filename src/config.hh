@@ -22,8 +22,8 @@ namespace hitsuji
 //  TREP-RT service name, e.g. IDN_RDF, hEDD, ELEKTRON_DD.
 		std::string service_name;
 
-//  Default TREP-RT RSSL port, e.g. 14002, 14003.
-		std::string rssl_default_port;
+//  TREP-RT RSSL port, e.g. 14002, 14003.
+		std::string rssl_port;
 
 //  RSSL vendor name.
 		std::string vendor_name;
@@ -43,7 +43,7 @@ namespace hitsuji
 		std::ostringstream ss;
 		o << "config_t: { "
 			  "\"service_name\": \"" << config.service_name << "\""
-			", \"rssl_default_port\": \"" << config.rssl_default_port << "\""
+			", \"rssl_port\": \"" << config.rssl_port << "\""
 			", \"vendor_name\": \"" << config.vendor_name << "\""
 			", \"maximum_data_size\": " << config.maximum_data_size <<
 			", \"session_capacity\": " << config.session_capacity << 

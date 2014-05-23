@@ -8,8 +8,8 @@ static const char* kDefaultRsslPort = "14002";
 hitsuji::config_t::config_t() :
 /* default values */
 	service_name ("NOCACHE_VTA"),
-	rssl_default_port ("24002"),
-	vendor_name ("VendorName"),
+	rssl_port ("24002"),
+	vendor_name ("Thomson Reuters"),
 	maximum_data_size (64 * 1024),
 	session_capacity (8),
 	worker_count (2)

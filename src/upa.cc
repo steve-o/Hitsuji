@@ -25,17 +25,17 @@ hitsuji::upa_t::~upa_t()
 bool
 hitsuji::upa_t::Init()
 {
-	RsslError upa_err;
+	RsslError rssl_err;
 
 /* UPA library state.  As of rssl1.5 rsslInitialize implements reference
  * counting so each call should be matched with a call to rsslUninitialize.
  */
 	VLOG(2) << "Initializing UPA.";
-	if (RSSL_RET_SUCCESS != rsslInitialize (RSSL_LOCK_NONE, &upa_err)) {
+	if (RSSL_RET_SUCCESS != rsslInitialize (RSSL_LOCK_NONE, &rssl_err)) {
 		LOG(ERROR) << "rsslInitialize: { "
-			  "\"rsslErrorId\": " << upa_err.rsslErrorId << ""
-			", \"sysError\": " << upa_err.sysError << ""
-			", \"text\": \"" << upa_err.text << "\""
+			  "\"rsslErrorId\": " << rssl_err.rsslErrorId << ""
+			", \"sysError\": " << rssl_err.sysError << ""
+			", \"text\": \"" << rssl_err.text << "\""
 			" }";
 		return false;
 	}

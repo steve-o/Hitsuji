@@ -83,9 +83,9 @@ hitsuji::client_t::~client_t()
 	const auto uptime = second_clock::universal_time() - creation_time_;
 	VLOG(3) << prefix_ << "Summary: {"
 		 " \"Uptime\": \"" << to_simple_string (uptime) << "\""
-		", \"MsgsReceived\": " << cumulative_stats_[CLIENT_PC_UPA_MSGS_RECEIVED] <<
-		", \"MsgsSent\": " << cumulative_stats_[CLIENT_PC_UPA_MSGS_SENT] <<
-		", \"MsgsRejected\": " << cumulative_stats_[CLIENT_PC_UPA_MSGS_REJECTED] <<
+		", \"MsgsReceived\": " << cumulative_stats_[CLIENT_PC_RSSL_MSGS_RECEIVED] <<
+		", \"MsgsSent\": " << cumulative_stats_[CLIENT_PC_RSSL_MSGS_SENT] <<
+		", \"MsgsRejected\": " << cumulative_stats_[CLIENT_PC_RSSL_MSGS_REJECTED] <<
 		" }";
 }
 
@@ -177,7 +177,7 @@ hitsuji::client_t::OnMsg (
 	)
 {
 	DCHECK (nullptr != msg);
-	cumulative_stats_[CLIENT_PC_UPA_MSGS_RECEIVED]++;
+	cumulative_stats_[CLIENT_PC_RSSL_MSGS_RECEIVED]++;
 	switch (msg->msgBase.msgClass) {
 	case RSSL_MC_REQUEST:
 		return OnRequestMsg (reinterpret_cast<const RsslRequestMsg*> (msg));
@@ -190,7 +190,7 @@ hitsuji::client_t::OnMsg (
 	case RSSL_MC_GENERIC:
 	case RSSL_MC_POST:
 	default:
-		cumulative_stats_[CLIENT_PC_UPA_MSGS_REJECTED]++;
+		cumulative_stats_[CLIENT_PC_RSSL_MSGS_REJECTED]++;
 		LOG(WARNING) << prefix_ << "Uncaught message: " << msg;
 /* abort connection if status message fails. */
 		return SendClose (msg->msgBase.streamId,
@@ -1935,7 +1935,7 @@ hitsuji::client_t::Submit (
 	)
 {
 	const int status = provider_->Submit (handle_, buf);
-	if (status) cumulative_stats_[CLIENT_PC_UPA_MSGS_SENT]++;
+	if (status) cumulative_stats_[CLIENT_PC_RSSL_MSGS_SENT]++;
 	return status;
 }
 

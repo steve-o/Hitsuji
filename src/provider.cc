@@ -1,6 +1,6 @@
 /* UPA provider.
  *
- * One single provider, and hence wraps a UPA session for simplicity.
+ * One single provider, and hence wraps a RSSL socket for simplicity.
  */
 
 #include "provider.hh"
@@ -42,7 +42,7 @@ hitsuji::provider_t::~provider_t()
 {
 	DLOG(INFO) << "~provider_t";
 	Close();
-/* Cleanup UPA stack. */
+/* Cleanup RSSL stack. */
 	upa_.reset();
 /* Summary output */
 	using namespace boost::posix_time;
@@ -51,10 +51,10 @@ hitsuji::provider_t::~provider_t()
 		 " \"Uptime\": \"" << to_simple_string (uptime) << "\""
 		", \"ConnectionsReceived\": " << cumulative_stats_[PROVIDER_PC_CONNECTION_RECEIVED] <<
 		", \"ClientSessions\": " << cumulative_stats_[PROVIDER_PC_CLIENT_SESSION_ACCEPTED] <<
-		", \"MsgsReceived\": " << cumulative_stats_[PROVIDER_PC_UPA_MSGS_RECEIVED] <<
-		", \"MsgsMalformed\": " << cumulative_stats_[PROVIDER_PC_UPA_MSGS_MALFORMED] <<
-		", \"MsgsSent\": " << cumulative_stats_[PROVIDER_PC_UPA_MSGS_SENT] <<
-		", \"MsgsEnqueued\": " << cumulative_stats_[PROVIDER_PC_UPA_MSGS_ENQUEUED] <<
+		", \"MsgsReceived\": " << cumulative_stats_[PROVIDER_PC_RSSL_MSGS_RECEIVED] <<
+		", \"MsgsMalformed\": " << cumulative_stats_[PROVIDER_PC_RSSL_MSGS_MALFORMED] <<
+		", \"MsgsSent\": " << cumulative_stats_[PROVIDER_PC_RSSL_MSGS_SENT] <<
+		", \"MsgsEnqueued\": " << cumulative_stats_[PROVIDER_PC_RSSL_MSGS_ENQUEUED] <<
 		" }";
 }
 
@@ -70,11 +70,11 @@ hitsuji::provider_t::Init()
 	RsslBindOptions addr;
 	rsslClearBindOptions (&addr);
 #endif
-	RsslError upa_err;
+	RsslError rssl_err;
 
 	last_activity_ = boost::posix_time::second_clock::universal_time();
 
-/* UPA Version Info. */
+/* RSSL Version Info. */
 	if (!upa_->VerifyVersion())
 		return false;
 
@@ -85,13 +85,13 @@ hitsuji::provider_t::Init()
 	addr.majorVersion	     = RSSL_RWF_MAJOR_VERSION;
 	addr.minorVersion	     = RSSL_RWF_MINOR_VERSION;
 
-	RsslServer* s = rsslBind (&addr, &upa_err);
+	RsslServer* s = rsslBind (&addr, &rssl_err);
 /* Hard failure on bind as likely a configuration issue. */
 	if (nullptr == s) {
 		LOG(ERROR) << "rsslBind: { "
-			  "\"rsslErrorId\": " << upa_err.rsslErrorId << ""
-			", \"sysError\": " << upa_err.sysError << ""
-			", \"text\": \"" << upa_err.text << "\""
+			  "\"rsslErrorId\": " << rssl_err.rsslErrorId << ""
+			", \"sysError\": " << rssl_err.sysError << ""
+			", \"text\": \"" << rssl_err.text << "\""
 			", \"serviceName\": \"" << addr.serviceName << "\""
 			", \"protocolType\": \"" << internal::protocol_type_string (addr.protocolType) << "\""
 			", \"majorVersion\": " << static_cast<unsigned> (addr.majorVersion) << ""
@@ -143,9 +143,9 @@ hitsuji::provider_t::Close()
 				rc = rsslFlush (c, &rssl_err);
 /* flushed */
 				if (RSSL_RET_SUCCESS == rc) {
-					cumulative_stats_[PROVIDER_PC_UPA_MSGS_SENT] += client->GetPendingCount();
+					cumulative_stats_[PROVIDER_PC_RSSL_MSGS_SENT] += client->GetPendingCount();
 					client->ClearPendingCount();
-					cumulative_stats_[PROVIDER_PC_UPA_FLUSH]++;
+					cumulative_stats_[PROVIDER_PC_RSSL_FLUSH]++;
 					FD_CLR (c->socketId, &in_wfds_);
 					break;
 				}
@@ -173,18 +173,18 @@ hitsuji::provider_t::Close()
 /* Close RSSL server socket. */
 	if (nullptr != rssl_sock_) {
 		RsslServerInfo server_info;
-		RsslError upa_err;
+		RsslError rssl_err;
 		VLOG(3) << "Closing RSSL server socket.";
-		VLOG_IF(3, RSSL_RET_SUCCESS == rsslGetServerInfo (rssl_sock_, &server_info, &upa_err))
+		VLOG_IF(3, RSSL_RET_SUCCESS == rsslGetServerInfo (rssl_sock_, &server_info, &rssl_err))
 			<< "RSSL server summary: {"
 			 " \"currentBufferUsage\": " << server_info.currentBufferUsage << ""
 			", \"peakBufferUsage\": " << server_info.peakBufferUsage << ""
 			" }";
-		if (RSSL_RET_SUCCESS != rsslCloseServer (rssl_sock_, &upa_err)) {
+		if (RSSL_RET_SUCCESS != rsslCloseServer (rssl_sock_, &rssl_err)) {
 			LOG(ERROR) << "rsslCloseServer: { "
-				  "\"rsslErrorId\": " << upa_err.rsslErrorId << ""
-				", \"sysError\": " << upa_err.sysError << ""
-				", \"text\": \"" << upa_err.text << "\""
+				  "\"rsslErrorId\": " << rssl_err.rsslErrorId << ""
+				", \"sysError\": " << rssl_err.sysError << ""
+				", \"text\": \"" << rssl_err.text << "\""
 				" }";
 		}
 		rssl_sock_ = nullptr;
@@ -243,7 +243,7 @@ hitsuji::provider_t::DoWork()
 					Ping (c);
 				}
 				if (last_activity_ >= client->NextPong()) {
-					cumulative_stats_[PROVIDER_PC_UPA_PONG_TIMEOUT]++;
+					cumulative_stats_[PROVIDER_PC_RSSL_PONG_TIMEOUT]++;
 					LOG(ERROR) << "Pong timeout from peer, aborting connection.";
 					Abort (c);
 				}
@@ -301,7 +301,7 @@ hitsuji::provider_t::DoWork()
 				Ping (c);
 			}
 			if (last_activity_ >= client->NextPong()) {
-				cumulative_stats_[PROVIDER_PC_UPA_PONG_TIMEOUT]++;
+				cumulative_stats_[PROVIDER_PC_RSSL_PONG_TIMEOUT]++;
 				LOG(ERROR) << "Pong timeout from peer, aborting connection.";
 				Abort (c);
 			}
@@ -488,7 +488,7 @@ hitsuji::provider_t::OnInitializingState (
 	switch (rc) {
 	case RSSL_RET_CHAN_INIT_IN_PROGRESS:
 		if ((state.flags & RSSL_IP_FD_CHANGE) == RSSL_IP_FD_CHANGE) {
-			cumulative_stats_[PROVIDER_PC_UPA_PROTOCOL_DOWNGRADE]++;
+			cumulative_stats_[PROVIDER_PC_RSSL_PROTOCOL_DOWNGRADE]++;
 			LOG(INFO) << "RSSL protocol downgrade, reconnected.";
 			FD_CLR (state.oldSocket, &in_rfds_); FD_CLR (state.oldSocket, &in_efds_);
 			FD_SET (c->socketId, &in_rfds_); FD_SET (c->socketId, &in_efds_);
@@ -528,12 +528,12 @@ hitsuji::provider_t::OnCanWriteWithoutBlocking (
 	DVLOG(1) << "rsslFlush";
 	rc = rsslFlush (c, &rssl_err);
 	if (RSSL_RET_SUCCESS == rc) {
-		cumulative_stats_[PROVIDER_PC_UPA_FLUSH]++;
+		cumulative_stats_[PROVIDER_PC_RSSL_FLUSH]++;
 		FD_CLR (c->socketId, &in_wfds_);
 /* Sent data equivalent to a ping. */
 		if (nullptr != c->userSpecPtr) {
 			auto client = reinterpret_cast<client_t*> (c->userSpecPtr);
-			cumulative_stats_[PROVIDER_PC_UPA_MSGS_SENT] += client->GetPendingCount();
+			cumulative_stats_[PROVIDER_PC_RSSL_MSGS_SENT] += client->GetPendingCount();
 			client->ClearPendingCount();
 			client->SetNextPing (last_activity_ + boost::posix_time::seconds (client->ping_interval_));
 		}
@@ -649,13 +649,13 @@ hitsuji::provider_t::OnActiveState (
 	switch (rc) {
 /* Reliable multicast events with hard-fail override. */
 	case RSSL_RET_CONGESTION_DETECTED:
-		cumulative_stats_[PROVIDER_PC_UPA_CONGESTION_DETECTED]++;
+		cumulative_stats_[PROVIDER_PC_RSSL_CONGESTION_DETECTED]++;
 		goto check_closed_state;
 	case RSSL_RET_SLOW_READER:
-		cumulative_stats_[PROVIDER_PC_UPA_SLOW_READER]++;
+		cumulative_stats_[PROVIDER_PC_RSSL_SLOW_READER]++;
 		goto check_closed_state;
 	case RSSL_RET_PACKET_GAP_DETECTED:
-		cumulative_stats_[PROVIDER_PC_UPA_PACKET_GAP_DETECTED]++;
+		cumulative_stats_[PROVIDER_PC_RSSL_PACKET_GAP_DETECTED]++;
 		goto check_closed_state;
 check_closed_state:
 		if (RSSL_CH_STATE_CLOSED != c->state) {
@@ -667,13 +667,13 @@ check_closed_state:
 			break;
 		}
 	case RSSL_RET_READ_FD_CHANGE:
-		cumulative_stats_[PROVIDER_PC_UPA_RECONNECT]++;
+		cumulative_stats_[PROVIDER_PC_RSSL_RECONNECT]++;
 		LOG(INFO) << "RSSL reconnected.";
 		FD_CLR (c->oldSocketId, &in_rfds_); FD_CLR (c->oldSocketId, &in_efds_);
 		FD_SET (c->socketId, &in_rfds_); FD_SET (c->socketId, &in_efds_);
 		break;
 	case RSSL_RET_READ_PING:
-		cumulative_stats_[PROVIDER_PC_UPA_PONG_RECEIVED]++;
+		cumulative_stats_[PROVIDER_PC_RSSL_PONG_RECEIVED]++;
 		if (nullptr != c->userSpecPtr) {
 			auto client = reinterpret_cast<client_t*> (c->userSpecPtr);
 			client->SetNextPong (last_activity_ + boost::posix_time::seconds (c->pingTimeout));
@@ -681,7 +681,7 @@ check_closed_state:
 		LOG(INFO) << "RSSL pong.";
 		break;
 	case RSSL_RET_FAILURE:
-		cumulative_stats_[PROVIDER_PC_UPA_READ_FAILURE]++;
+		cumulative_stats_[PROVIDER_PC_RSSL_READ_FAILURE]++;
 		LOG(ERROR) << "rsslReadEx: { "
 			  "\"rsslErrorId\": " << rssl_err.rsslErrorId << ""
 			", \"sysError\": " << rssl_err.sysError << ""
@@ -697,7 +697,7 @@ check_closed_state:
 	case RSSL_RET_SUCCESS:
 	default: 
 		if (nullptr != buf) {
-			cumulative_stats_[PROVIDER_PC_UPA_MSGS_RECEIVED]++;
+			cumulative_stats_[PROVIDER_PC_RSSL_MSGS_RECEIVED]++;
 			OnMsg (c, buf);
 /* Received data equivalent to a heartbeat pong. */
 			if (nullptr != c->userSpecPtr) {
@@ -748,7 +748,7 @@ hitsuji::provider_t::OnMsg (
 	rc = rsslSetDecodeIteratorBuffer (&it, buf);
 	if (RSSL_RET_SUCCESS != rc) {
 /* Invalid buffer or internal error, discard the message. */
-		cumulative_stats_[PROVIDER_PC_UPA_MSGS_MALFORMED]++;
+		cumulative_stats_[PROVIDER_PC_RSSL_MSGS_MALFORMED]++;
 		Abort (handle);
 		LOG(ERROR) << "rsslSetDecodeIteratorBuffer: { "
 			  "\"returnCode\": " << static_cast<signed> (rc) << ""
@@ -761,7 +761,7 @@ hitsuji::provider_t::OnMsg (
 /* Decode data buffer into RSSL message */
 	rc = rsslDecodeMsg (&it, &msg);
 	if (RSSL_RET_SUCCESS != rc) {
-		cumulative_stats_[PROVIDER_PC_UPA_MSGS_MALFORMED]++;
+		cumulative_stats_[PROVIDER_PC_RSSL_MSGS_MALFORMED]++;
 		Abort (handle);
 		LOG(WARNING) << "rsslDecodeMsg: { "
 			  "\"returnCode\": " << static_cast<signed> (rc) << ""
@@ -770,16 +770,16 @@ hitsuji::provider_t::OnMsg (
 			" }";
 		return;
 	} else {
-		cumulative_stats_[PROVIDER_PC_UPA_MSGS_DECODED]++;
+		cumulative_stats_[PROVIDER_PC_RSSL_MSGS_DECODED]++;
 		if (logging::DEBUG_MODE) {
-/* Pass through UPA validation and report exceptions */
+/* Pass through RSSL validation and report exceptions */
 			if (!rsslValidateMsg (&msg)) {
-				cumulative_stats_[PROVIDER_PC_UPA_MSGS_MALFORMED]++;
+				cumulative_stats_[PROVIDER_PC_RSSL_MSGS_MALFORMED]++;
 				LOG(WARNING) << "rsslValidateMsg failed.";
 				Abort (handle);
 				return;
 			} else {
-				cumulative_stats_[PROVIDER_PC_UPA_MSGS_VALIDATED]++;
+				cumulative_stats_[PROVIDER_PC_RSSL_MSGS_VALIDATED]++;
 				LOG(INFO) << "rsslValidateMsg success.";
 			}
 			DVLOG(3) << msg;
@@ -1657,22 +1657,22 @@ try_again:
 			auto client = reinterpret_cast<client_t*> (c->userSpecPtr);
 			client->IncrementPendingCount();
 		}
-		cumulative_stats_[PROVIDER_PC_UPA_MSGS_ENQUEUED]++;
+		cumulative_stats_[PROVIDER_PC_RSSL_MSGS_ENQUEUED]++;
 		goto pending;
 	}
 	switch (rc) {
 	case RSSL_RET_WRITE_CALL_AGAIN:			/* fragmenting the buffer and needs to be called again with the same buffer. */
 		goto try_again;
 	case RSSL_RET_WRITE_FLUSH_FAILED:		/* attempted to flush data to the connection but was blocked. */
-		cumulative_stats_[PROVIDER_PC_UPA_WRITE_FLUSH_FAILED]++;
+		cumulative_stats_[PROVIDER_PC_RSSL_WRITE_FLUSH_FAILED]++;
 		goto pending;
 	case RSSL_RET_BUFFER_NO_BUFFERS:		/* empty buffer pool: spin wait until buffer is available. */
-		cumulative_stats_[PROVIDER_PC_UPA_WRITE_NO_BUFFERS]++;
+		cumulative_stats_[PROVIDER_PC_RSSL_WRITE_NO_BUFFERS]++;
 pending:
 		FD_SET (c->socketId, &in_wfds_);	/* pending output */
 		return -1;
 	case RSSL_RET_SUCCESS:				/* sent, no flush required. */
-		cumulative_stats_[PROVIDER_PC_UPA_MSGS_SENT]++;
+		cumulative_stats_[PROVIDER_PC_RSSL_MSGS_SENT]++;
 /* Sent data equivalent to a ping. */
 		if (nullptr != c->userSpecPtr) {
 			auto client = reinterpret_cast<client_t*> (c->userSpecPtr);
@@ -1680,7 +1680,7 @@ pending:
 		}
 		return 1;
 	default:
-		cumulative_stats_[PROVIDER_PC_UPA_WRITE_EXCEPTION]++;
+		cumulative_stats_[PROVIDER_PC_RSSL_WRITE_EXCEPTION]++;
 		LOG(ERROR) << "rsslWriteEx: { "
 			  "\"rsslErrorId\": " << rssl_err.rsslErrorId << ""
 			", \"sysError\": " << rssl_err.sysError << ""
@@ -1722,10 +1722,10 @@ hitsuji::provider_t::Ping (
 	if (rc > 0) goto pending;
 	switch (rc) {
 	case RSSL_RET_WRITE_FLUSH_FAILED:		/* attempted to flush data to the connection but was blocked. */
-		cumulative_stats_[PROVIDER_PC_UPA_PING_FLUSH_FAILED]++;
+		cumulative_stats_[PROVIDER_PC_RSSL_PING_FLUSH_FAILED]++;
 		goto pending;
 	case RSSL_RET_BUFFER_NO_BUFFERS:		/* empty buffer pool: spin wait until buffer is available. */
-		cumulative_stats_[PROVIDER_PC_UPA_PING_NO_BUFFERS]++;
+		cumulative_stats_[PROVIDER_PC_RSSL_PING_NO_BUFFERS]++;
 pending:
 /* Pings should only occur when no writes are pending, thus rsslPing internally calls rsslFlush
  * automatically.  If this fails then either the client has stalled or the systems is out of 
@@ -1739,7 +1739,7 @@ pending:
 			" }";
 		return -1;
 	case RSSL_RET_SUCCESS:				/* sent, no flush required. */
-		cumulative_stats_[PROVIDER_PC_UPA_PING_SENT]++;
+		cumulative_stats_[PROVIDER_PC_RSSL_PING_SENT]++;
 /* Advance ping expiration only on success. */
 		if (nullptr != c->userSpecPtr) {
 			auto client = reinterpret_cast<client_t*> (c->userSpecPtr);
@@ -1747,7 +1747,7 @@ pending:
 		}
 		return 1;
 	default:
-		cumulative_stats_[PROVIDER_PC_UPA_PING_EXCEPTION]++;
+		cumulative_stats_[PROVIDER_PC_RSSL_PING_EXCEPTION]++;
 		LOG(ERROR) << "rsslPing: { "
 			  "\"rsslErrorId\": " << rssl_err.rsslErrorId << ""
 			", \"sysError\": " << rssl_err.sysError << ""

@@ -30,7 +30,6 @@ hitsuji::provider_t::provider_t (
 	keep_running_ (true),
 	min_rwf_version_ (0),
 	service_id_ (1),	// first and only service
-service_state_ (RDM_DIRECTORY_SERVICE_STATE_UP),
 	is_accepting_connections_ (true),
 	is_accepting_requests_ (true)
 {
@@ -1533,9 +1532,7 @@ hitsuji::provider_t::GetServiceState (
  */
 	element.name       = RSSL_ENAME_SVC_STATE;
 	element.dataType   = RSSL_DT_UINT;
-//	static const uint64_t service_state = RDM_DIRECTORY_SERVICE_STATE_UP;
-	const RsslUInt64 service_state = service_state_ ? RDM_DIRECTORY_SERVICE_STATE_UP : RDM_DIRECTORY_SERVICE_STATE_DOWN;
-	LOG(INFO) << "encoding ServiceState as " << service_state;
+	static const uint64_t service_state = RDM_DIRECTORY_SERVICE_STATE_UP;
 	rc = rsslEncodeElementEntry (it, &element, &service_state);
 	if (RSSL_RET_SUCCESS != rc) {
 		LOG(ERROR) << "rsslEncodeElementEntry failed: { "
@@ -1572,30 +1569,6 @@ hitsuji::provider_t::GetServiceState (
 			" }";
 		return false;
 	}
-
-if (0 == service_state_) {
-element.name = RSSL_ENAME_STATUS;
-element.dataType = RSSL_DT_STATE;
-RsslState state;
-rsslClearState (&state);
-state.streamState = RSSL_STREAM_OPEN;
-state.dataState = RSSL_DATA_SUSPECT;
-state.code = RSSL_SC_NONE;
-state.text.data = "DOWN";
-state.text.length = (uint32_t)strlen ("DOWN");
-	rc = rsslEncodeElementEntry (it, &element, &state);
-	if (RSSL_RET_SUCCESS != rc) {
-		LOG(ERROR) << "rsslEncodeElementEntry failed: { "
-			  "\"returnCode\": " << static_cast<signed> (rc) << ""
-			", \"enumeration\": \"" << rsslRetCodeToString (rc) << "\""
-			", \"text\": \"" << rsslRetCodeInfo (rc) << "\""
-			", \"name\": \"RSSL_ENAME_STATUS\""
-			", \"dataType\": \"" << rsslDataTypeToString (element.dataType) << "\""
-			", \"isAcceptingRequests\": " << is_accepting_requests_ << ""
-			" }";
-		return false;
-	}
-}
 
 	rc = rsslEncodeElementListComplete (it, RSSL_TRUE /* commit */);
 	if (RSSL_RET_SUCCESS != rc) {

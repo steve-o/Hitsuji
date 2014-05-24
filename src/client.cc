@@ -708,7 +708,6 @@ hitsuji::client_t::OnDirectoryRequest (
 	const uint32_t filter_mask  = request_msg->msgBase.msgKey.filter;
 
 	const int32_t request_token = request_msg->msgBase.streamId;
-directory_token_ = request_token;
 	if (has_service_name)
 	{
 		const char* service_name = request_msg->msgBase.msgKey.name.data;
@@ -784,28 +783,6 @@ hitsuji::client_t::OnItemRequest (
 		LOG(INFO) << prefix_ << "Closing request for client without accepted login.";
 		return SendClose (request_token, service_id, model_type, item_name, item_name_len, use_attribinfo_in_updates, RSSL_SC_USAGE_ERROR);
 	}
-
-{
-	std::string ric (item_name, item_name_len);
-	if (0 == ric.compare ("DOWN")) {
-		LOG(INFO) << "Setting DOWN ...";
-		provider_->service_state_ = RDM_DIRECTORY_SERVICE_STATE_DOWN;
-		for (auto it = provider_->clients_.begin(); it != provider_->clients_.end(); ++it) {
-			auto client = it->second;
-			client->SendDirectoryUpdate (provider_->GetServiceName());
-		}		
-		return SendClose (request_token, service_id, model_type, item_name, item_name_len, use_attribinfo_in_updates, RSSL_SC_NOT_ENTITLED);
-	}
-	if (0 == ric.compare ("UP")) {
-		provider_->service_state_ = RDM_DIRECTORY_SERVICE_STATE_UP;
-		LOG(INFO) << "Setting UP ...";
-		for (auto it = provider_->clients_.begin(); it != provider_->clients_.end(); ++it) {
-			auto client = it->second;
-			client->SendDirectoryUpdate (provider_->GetServiceName());
-		}		
-		return SendClose (request_token, service_id, model_type, item_name, item_name_len, use_attribinfo_in_updates, RSSL_SC_NOT_ENTITLED);
-	}
-}
 
 /* Only accept MMT_MARKET_PRICE. */
 	if (RSSL_DMT_MARKET_PRICE != model_type)
@@ -1618,146 +1595,6 @@ hitsuji::client_t::SendDirectoryResponse (
 		LOG(ERROR) << prefix_ << "rsslEncodeMsgComplete: { "
 			  "\"returnCode\": " << static_cast<signed> (rc) << ""
 			", \"enumeration\": \"" << rsslRetCodeToString (rc) << "\""
-			", \"text\": \"" << rsslRetCodeInfo (rc) << "\""
-			" }";
-		goto cleanup;
-	}
-	buf->length = rsslGetEncodedBufferLength (&it);
-	LOG_IF(WARNING, 0 == buf->length) << prefix_ << "rsslGetEncodedBufferLength returned 0.";
-
-/* Message validation. */
-	if (!rsslValidateMsg (reinterpret_cast<RsslMsg*> (&response))) {
-		cumulative_stats_[CLIENT_PC_MMT_DIRECTORY_MALFORMED]++;
-		LOG(ERROR) << prefix_ << "rsslValidateMsg failed.";
-		goto cleanup;
-	} else {
-		cumulative_stats_[CLIENT_PC_MMT_DIRECTORY_VALIDATED]++;
-		LOG(INFO) << prefix_ << "rsslValidateMsg succeeded.";
-	}
-
-	if (!Submit (buf)) {
-		LOG(ERROR) << prefix_ << "Submit failed.";
-		goto cleanup;
-	}
-	cumulative_stats_[CLIENT_PC_MMT_DIRECTORY_SENT]++;
-	return true;
-cleanup:
-	if (RSSL_RET_SUCCESS != rsslReleaseBuffer (buf, &rssl_err)) {
-		LOG(WARNING) << prefix_ << "rsslReleaseBuffer: { "
-			  "\"rsslErrorId\": " << rssl_err.rsslErrorId << ""
-			", \"sysError\": " << rssl_err.sysError << ""
-			", \"text\": \"" << rssl_err.text << "\""
-			" }";
-	}
-	return false;
-}
-
-bool
-hitsuji::client_t::SendDirectoryUpdate (
-	const char* service_name
-	)
-{
-/* 7.5.9.1 Create a response message (4.2.2) */
-	RsslUpdateMsg response = RSSL_INIT_UPDATE_MSG;
-#ifndef NDEBUG
-	RsslEncodeIterator it = RSSL_INIT_ENCODE_ITERATOR;
-#else
-	RsslEncodeIterator it;
-	rsslClearEncodeIterator (&it);
-#endif
-	RsslBuffer* buf;
-	RsslError rssl_err;
-	RsslRet rc;
-
-	VLOG(2) << prefix_ << "Sending directory update.";
-
-/* 7.5.9.2 Set the message model type of the response. */
-	response.msgBase.domainType = RSSL_DMT_SOURCE;
-/* 7.5.9.3 Set response type. */
-	response.msgBase.msgClass = RSSL_MC_UPDATE;
-/* 7.5.9.4 Set the response type enumeration.
- * Note type is unsolicited despite being a mandatory requirement before
- * publishing.
- */
-	response.flags = RSSL_UPMF_DO_NOT_CONFLATE;
-/* Directory map. */
-	response.msgBase.containerType = RSSL_DT_MAP;
-/* DataMask: required for refresh RespMsg
- *   SERVICE_INFO_FILTER  - Static information about service.
- *   SERVICE_STATE_FILTER - Refresh or update state.
- *   SERVICE_GROUP_FILTER - Transient groups within service.
- *   SERVICE_LOAD_FILTER  - Statistics about concurrent stream support.
- *   SERVICE_DATA_FILTER  - Broadcast data.
- *   SERVICE_LINK_FILTER  - Load balance grouping.
- */
-	response.msgBase.msgKey.filter = RDM_DIRECTORY_SERVICE_STATE_FILTER;
-/* Name:        Not used */
-/* NameType:    Not used */
-/* ServiceName: Not used */
-/* ServiceId:   Not used */
-/* Id:          Not used */
-/* Attrib:      Not used */
-	response.msgBase.msgKey.flags = RSSL_MKF_HAS_FILTER;
-	response.flags |= RSSL_UPMF_HAS_MSG_KEY;
-/* set token */
-	response.msgBase.streamId = directory_token_;
-
-/* pop buffer from RSSL memory pool */
-	buf = rsslGetBuffer (handle_, MAX_MSG_SIZE, RSSL_FALSE /* not packed */, &rssl_err);
-	if (nullptr == buf) {
-		LOG(ERROR) << prefix_ << "rsslGetBuffer: { "
-			  "\"rsslErrorId\": " << rssl_err.rsslErrorId << ""
-			", \"sysError\": " << rssl_err.sysError << ""
-			", \"text\": \"" << rssl_err.text << "\""
-			", \"size\": " << MAX_MSG_SIZE << ""
-			", \"packedBuffer\": false"
-			" }";
-		return false;
-	}
-/* tie buffer to RSSL write iterator */
-	rc = rsslSetEncodeIteratorBuffer (&it, buf);
-	if (RSSL_RET_SUCCESS != rc) {
-		LOG(ERROR) << prefix_ << "rsslSetEncodeIteratorBuffer: { "
-			  "\"returnCode\": " << static_cast<signed> (rc) << ""
-			", \"enumeration\": \"" << rsslRetCodeToString (rc) << "\""
-			", \"text\": \"" << rsslRetCodeInfo (rc) << "\""
-			" }";
-		goto cleanup;
-	}
-/* encode with clients preferred protocol version */
-	rc = rsslSetEncodeIteratorRWFVersion (&it, GetRwfMajorVersion(), GetRwfMinorVersion());
-	if (RSSL_RET_SUCCESS != rc) {
-		LOG(ERROR) << prefix_ << "rsslSetEncodeIteratorRWFVersion: { "
-			  "\"returnCode\": " << static_cast<signed> (rc) << ""
-			", \"enumeration\": \"" << rsslRetCodeToString (rc) << "\""
-			", \"text\": \"" << rsslRetCodeInfo (rc) << "\""
-			", \"majorVersion\": " << static_cast<unsigned> (GetRwfMajorVersion()) << ""
-			", \"minorVersion\": " << static_cast<unsigned> (GetRwfMinorVersion()) << ""
-			" }";
-		goto cleanup;
-	}
-/* start multi-step encoder */
-	rc = rsslEncodeMsgInit (&it, reinterpret_cast<RsslMsg*> (&response), MAX_MSG_SIZE);
-	if (RSSL_RET_ENCODE_CONTAINER != rc) {
-		LOG(ERROR) << prefix_ << "rsslEncodeMsgInit failed: { "
-			  "\"returnCode\": " << static_cast<signed> (rc) << ""
-			", \"enumeration\": \"" << rsslRetCodeToString (rc) << "\""
-			", \"text\": \"" << rsslRetCodeInfo (rc) << "\""
-			", \"dataMaxSize\": " << MAX_MSG_SIZE << ""
-			" }";
-		goto cleanup;
-	}
-/* populate directory map */
-	if (!provider_->GetDirectoryMap (&it, service_name, RDM_DIRECTORY_SERVICE_STATE_FILTER, RSSL_MPEA_UPDATE_ENTRY)) {
-		LOG(ERROR) << prefix_ << "GetDirectoryMap failed.";
-		goto cleanup;
-	}
-/* finalize multi-step encoder */
-	rc = rsslEncodeMsgComplete (&it, RSSL_TRUE /* commit */);
-	if (RSSL_RET_SUCCESS != rc) {
-		LOG(ERROR) << prefix_ << "rsslEncodeMsgComplete: { "
-			  "\"returnCode\": " << static_cast<signed> (rc) << ""
-				", \"enumeration\": \"" << rsslRetCodeToString (rc) << "\""
 			", \"text\": \"" << rsslRetCodeInfo (rc) << "\""
 			" }";
 		goto cleanup;

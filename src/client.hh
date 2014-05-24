@@ -112,7 +112,6 @@ namespace hitsuji
 		bool AcceptLogin (const RsslRequestMsg* msg, int32_t login_token);
 
 		bool SendDirectoryResponse (int32_t token, const char* service_name, uint32_t filter_mask);
-bool SendDirectoryUpdate (const char* service_name);
 		bool SendClose (int32_t token, uint16_t service_id, uint8_t model_type, const char* name, size_t name_len, bool use_attribinfo_in_updates, uint8_t status_code);
 		bool SendInitial (uint16_t service_id, int32_t token, const char* name, size_t name_len, const boost::posix_time::ptime& timestamp);
 		int Submit (RsslBuffer* buf);
@@ -165,7 +164,6 @@ bool SendDirectoryUpdate (const char* service_name);
  */
 		bool is_logged_in_;
 		int32_t login_token_;
-int32_t directory_token_;
 /* RSSL keepalive state. */
 		boost::posix_time::ptime next_ping_;
 		boost::posix_time::ptime next_pong_;

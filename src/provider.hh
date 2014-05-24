@@ -209,9 +209,6 @@ namespace hitsuji
 
 /* Directory mapped ServiceID */
 		boost::atomic_uint16_t service_id_;
-public:
-unsigned service_state_;
-private:
 /* RFA can reject new client requests whilst maintaining current connected sessions.
  */
 		bool is_accepting_connections_;

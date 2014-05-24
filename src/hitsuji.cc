@@ -10,54 +10,75 @@
 #include <windows.h>
 
 #include "chromium/logging.hh"
+#include "provider.hh"
 #include "upa.hh"
+#include "version.hh"
 
-static std::weak_ptr<hitsuji::provider_t> g_provider;
+/* Global weak pointer to shutdown as application */
+static std::weak_ptr<hitsuji::hitsuji_t> g_application;
 
+boost::atomic_uint hitsuji::hitsuji_t::instance_count_ (0);
+/* List of all instances for external enumeration, e.g. SNMP walk. */
+std::list<hitsuji::hitsuji_t*> hitsuji::hitsuji_t::global_list_;
+boost::shared_mutex hitsuji::hitsuji_t::global_list_lock_;
 
 hitsuji::hitsuji_t::hitsuji_t()
-{
+	: mainloop_shutdown_ (false)
+	, shutting_down_ (false)
+/* Unique instance number, never decremented. */
+	, instance_ (instance_count_.fetch_add (1, boost::memory_order_relaxed))
+{	
 }
 
 hitsuji::hitsuji_t::~hitsuji_t()
 {
-	LOG(INFO) << "fin.";
 }
 
-int
-hitsuji::hitsuji_t::Run ()
+#ifndef CONFIG_AS_APPLICATION
+/* Plugin entry point from the Velocity Analytics Engine.
+ */
+void
+hitsuji::hitsuji_t::init (
+	const vpf::UserPluginConfig& vpf_config
+	)
 {
-	LOG(INFO) << config_;
-
-	try {
-/* UPA context. */
-		upa_.reset (new upa_t (config_));
-		if (!(bool)upa_ || !upa_->Init())
-			goto cleanup;
-
-/* UPA provider. */
-		provider_.reset (new provider_t (config_, upa_));
-		if (!(bool)provider_ || !provider_->Init())
-			goto cleanup;
-/* Create weak pointer to handle application shutdown. */
-		g_provider = provider_;
-
-	} catch (const std::exception& e) {
-		LOG(ERROR) << "Exception: { "
-			"\"What\": \"" << e.what() << "\" }";
+/* Thunk to VA user-plugin base class. */
+	vpf::AbstractUserPlugin::init (vpf_config);
+/* Save copies of provided identifiers. */
+	plugin_id_.assign (vpf_config.getPluginId());
+	plugin_type_.assign (vpf_config.getPluginType());
+	LOG(INFO) << "Starting SearchEngine plugin: { "
+		  "\"pluginType\": \"" << plugin_type_ << "\""
+		", \"pluginId\": \"" << plugin_id_ << "\""
+		" }";
+	if (!Start()) {
+		throw vpf::UserPluginException ("Hitsuji plugin start failed.");
 	}
-
-	LOG(INFO) << "Init complete, entering main loop.";
-	MainLoop ();
-	LOG(INFO) << "Main loop terminated, cleaning up.";
-	Clear();
-	return EXIT_SUCCESS;
-cleanup:
-	LOG(INFO) << "Init failed, cleaning up.";
-	Clear();
-	return EXIT_FAILURE;
 }
 
+/* Free all resources whilst logging device is attached. */
+void
+hitsuji::hitsuji_t::destroy ()
+{
+	LOG(INFO) << "Shutting down SearchEngine plugin: { "
+		  "\"pluginType\": \"" << plugin_type_ << "\""
+		", \"pluginId\": \"" << plugin_id_ << "\""
+		" }";
+	Stop();
+/* Thunk to VA user-plugin base class. */
+	vpf::AbstractUserPlugin::destroy();
+}
+
+/* Tcl API call */
+int
+hitsuji::hitsuji_t::execute (
+	const vpf::CommandInfo& cmdInfo,
+	vpf::TCLCommandData& cmdData
+	)
+{
+	return TCL_ERROR;
+}
+#else /* CONFIG_AS_APPLICATION */
 /* On a shutdown event set a global flag and force the event queue
  * to catch the event by submitting a log event.
  */
@@ -86,38 +107,152 @@ CtrlHandler (
 		message = "Caught shutdown event";
 		break;
 	}
-	if (!g_provider.expired()) {
-		LOG(INFO) << message << "; closing provider.";
-		auto sp = g_provider.lock();
+	if (!g_application.expired()) {
+		LOG(INFO) << message << "; shutting down application.";
+		auto sp = g_application.lock();
 		sp->Quit();
 	} else {
-		LOG(WARNING) << message << "; provider already expired.";
+		LOG(WARNING) << message << "; application already expired.";
 	}
 	return TRUE;
+}
+
+int
+hitsuji::hitsuji_t::Run()
+{
+	int rc = EXIT_SUCCESS;
+/* Add shutdown handler. */
+	g_application = shared_from_this();
+	::SetConsoleCtrlHandler ((PHANDLER_ROUTINE)::CtrlHandler, TRUE);
+	if (Start()) {
+/* Wait for mainloop to quit */
+		boost::unique_lock<boost::mutex> lock (mainloop_lock_);
+		while (!mainloop_shutdown_)
+			mainloop_cond_.wait (lock);
+		Reset();
+	} else {
+		rc = EXIT_FAILURE;
+	}
+/* Remove shutdown handler. */
+	::SetConsoleCtrlHandler ((PHANDLER_ROUTINE)::CtrlHandler, FALSE);
+	return rc;
+}
+
+void
+hitsuji::hitsuji_t::Quit()
+{
+	shutting_down_ = true;
+	if ((bool)provider_) {
+		provider_->Quit();
+	}
+}
+#endif /* CONFIG_AS_APPLICATION */
+
+bool
+hitsuji::hitsuji_t::Initialize()
+{
+	LOG(INFO) << "Hitsuji: { "
+		  "\"version\": \"" << version_major << '.' << version_minor << '.' << version_build << "\""
+		", \"build\": { "
+			  "\"date\": \"" << build_date << "\""
+			", \"time\": \"" << build_time << "\""
+			", \"system\": \"" << build_system << "\""
+			", \"machine\": \"" << build_machine << "\""
+			" }"
+		", \"config\": " << config_ <<
+		" }";
+	try {
+/* UPA context */
+		upa_.reset (new upa_t (config_));
+		if (!(bool)upa_ || !upa_->Initialize())
+			goto cleanup;
+/* UPA provider */
+		provider_.reset (new provider_t (config_, upa_));
+		if (!(bool)provider_ || !provider_->Initialize())
+			goto cleanup;
+	} catch (const std::exception& e) {
+		LOG(ERROR) << "Initialisation exception: { "
+			"\"What\": \"" << e.what() << "\" }";
+		goto cleanup;
+	}
+	LOG(INFO) << "Initialisation complete.";
+	return true;
+cleanup:
+	Reset();
+	LOG(INFO) << "Initialisation failed.";
+	return false;
+}
+
+bool
+hitsuji::hitsuji_t::Start()
+{
+	LOG(INFO) << "Starting instance: { "
+		  "\"instance\": " << instance_ <<
+		" }";
+	if (!shutting_down_ && Initialize()) {
+/* Spawn new thread for message pump. */
+		event_thread_.reset (new boost::thread ([this]() {
+			MainLoop();
+		}));
+	}
+	return true;
+}
+
+void
+hitsuji::hitsuji_t::Stop()
+{
+	LOG(INFO) << "Shutting down instance: { "
+		  "\"instance\": " << instance_ <<
+		" }";
+	shutting_down_ = true;
+	if ((bool)provider_) {
+		provider_->Quit();
+/* Wait for mainloop to quit */
+		boost::unique_lock<boost::mutex> lock (mainloop_lock_);
+		while (!mainloop_shutdown_)
+			mainloop_cond_.wait (lock);
+		Reset();
+	}
+}
+
+void
+hitsuji::hitsuji_t::Reset()
+{
+	if ((bool)provider_)
+		provider_->Close();
+	CHECK_LE (provider_.use_count(), 1);
+	provider_.reset();
+	CHECK_EQ (provider_.use_count(), 0);
+/* Release everything with an UPA dependency. */
+	CHECK_LE (upa_.use_count(), 1);
+	upa_.reset();
 }
 
 void
 hitsuji::hitsuji_t::MainLoop()
 {
-/* Add shutdown handler. */
-	::SetConsoleCtrlHandler ((PHANDLER_ROUTINE)::CtrlHandler, TRUE);
-	provider_->Run();
-/* Remove shutdown handler. */
-	::SetConsoleCtrlHandler ((PHANDLER_ROUTINE)::CtrlHandler, FALSE);
-}
-
-void
-hitsuji::hitsuji_t::Clear()
-{
-/* Close provider client set first */
-	if ((bool)provider_) {
-		provider_->Close();
+	{
+/* Add to global list of all instances. */
+		boost::unique_lock<boost::shared_mutex> (global_list_lock_);
+		global_list_.push_back (this);
 	}
-	CHECK_LE (provider_.use_count(), 1);
-	provider_.reset();
-/* Release everything with an UPA dependency. */
-	CHECK_LE (upa_.use_count(), 1);
-	upa_.reset();
+	try {
+		provider_->Run(); 
+	} catch (const std::exception& e) {
+		LOG(ERROR) << "Runtime exception: { "
+			"\"What\": \"" << e.what() << "\" }";
+	}
+	{
+/* Remove from list before clearing. */
+		boost::unique_lock<boost::shared_mutex> (global_list_lock_);
+		global_list_.remove (this);
+	}
+/* Raise condition loop is complete. */
+	{
+		boost::lock_guard<boost::mutex> lock (mainloop_lock_);
+		mainloop_shutdown_ = true;
+	}
+	mainloop_cond_.notify_one();
 }
 
 /* eof */

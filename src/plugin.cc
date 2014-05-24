@@ -21,7 +21,7 @@
 #include "chromium/logging_win.hh"
 #include "hitsuji.hh"
 
-static const char* kPluginType = "hitsujiPlugin";
+static const char* kPluginType = "HitsujiPlugin";
 
 // {E2FD9547-BF66-4349-A0E3-213DACE4D667}
 DEFINE_GUID(kLogProvider, 

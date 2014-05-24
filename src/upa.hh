@@ -20,7 +20,7 @@ namespace hitsuji
 		upa_t (const config_t& config);
 		~upa_t();
 
-		bool Init();
+		bool Initialize();
 		bool VerifyVersion();
 
 	private:

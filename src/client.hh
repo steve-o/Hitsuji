@@ -81,7 +81,7 @@ namespace hitsuji
 		client_t (std::shared_ptr<provider_t> provider, RsslChannel* handle, const char* address);
 		~client_t();
 
-		bool Init();
+		bool Initialize();
 		bool Close();
 
 		RsslChannel*const GetHandle() const {

@@ -62,13 +62,13 @@ hitsuji::provider_t::~provider_t()
  * Open RSSL port and listen for incoming connection attempts.
  */
 bool
-hitsuji::provider_t::Init()
+hitsuji::provider_t::Initialize()
 {
 #ifndef NDEBUG
 	RsslBindOptions addr = RSSL_INIT_BIND_OPTS;
 #else
 	RsslBindOptions addr;
-	rsslClearBindOptions (&addr);
+	rsslClearBindOpts (&addr);
 #endif
 	RsslError rssl_err;
 
@@ -362,7 +362,7 @@ hitsuji::provider_t::RejectConnection (
 	RsslAcceptOptions addr = RSSL_INIT_ACCEPT_OPTS;
 #else
 	RsslAcceptOptions addr;
-	rsslClearAcceptOptions (&addr);
+	rsslClearAcceptOpts (&addr);
 #endif
 	RsslError rssl_err;
 
@@ -391,7 +391,7 @@ hitsuji::provider_t::AcceptConnection (
 	RsslAcceptOptions addr = RSSL_INIT_ACCEPT_OPTS;
 #else
 	RsslAcceptOptions addr;
-	rsslClearAcceptOptions (&addr);
+	rsslClearAcceptOpts (&addr);
 #endif
 	RsslError rssl_err;
 
@@ -847,7 +847,7 @@ hitsuji::provider_t::AcceptClientSession (
 	VLOG(2) << "Accepting new client session request: { \"Address\": \"" << address << "\" }";
 
 	auto client = std::make_shared<client_t> (shared_from_this(), handle, address);
-	if (!(bool)client || !client->Init()) {
+	if (!(bool)client || !client->Initialize()) {
 		cumulative_stats_[PROVIDER_PC_CLIENT_INIT_EXCEPTION]++;
 		LOG(ERROR) << "Client session initialisation failed, aborting connection.";
 		return false;
@@ -1448,7 +1448,7 @@ hitsuji::provider_t::GetServiceQoS (
 	RsslArray rssl_array;
 	RsslQos qos;
 	rsslClearArray (&rssl_array);
-	rsslClearQoS (&qos);
+	rsslClearQos (&qos);
 #endif
 	RsslRet rc;
 

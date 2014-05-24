@@ -23,7 +23,7 @@ hitsuji::upa_t::~upa_t()
 }
 
 bool
-hitsuji::upa_t::Init()
+hitsuji::upa_t::Initialize()
 {
 	RsslError rssl_err;
 

@@ -90,7 +90,7 @@ hitsuji::client_t::~client_t()
 }
 
 bool
-hitsuji::client_t::Init()
+hitsuji::client_t::Initialize()
 {
 	RsslChannelInfo info;
 	RsslError rssl_err;
@@ -1032,7 +1032,7 @@ hitsuji::client_t::SendInitial (
 #ifndef NDEBUG
 	RsslEncodeIterator it = RSSL_INIT_ENCODE_ITERATOR;
 #else
-	RsslEncodeIterator it
+	RsslEncodeIterator it;
 	rsslClearEncodeIterator (&it);
 #endif
 	RsslBuffer* buf;
@@ -1515,7 +1515,7 @@ hitsuji::client_t::SendDirectoryResponse (
 #ifndef NDEBUG
 	RsslEncodeIterator it = RSSL_INIT_ENCODE_ITERATOR;
 #else
-	RsslEncodeIterator it
+	RsslEncodeIterator it;
 	rsslClearEncodeIterator (&it);
 #endif
 	RsslBuffer* buf;
@@ -1662,7 +1662,7 @@ hitsuji::client_t::SendDirectoryUpdate (
 #ifndef NDEBUG
 	RsslEncodeIterator it = RSSL_INIT_ENCODE_ITERATOR;
 #else
-	RsslEncodeIterator it
+	RsslEncodeIterator it;
 	rsslClearEncodeIterator (&it);
 #endif
 	RsslBuffer* buf;
@@ -1810,7 +1810,7 @@ hitsuji::client_t::SendClose (
  */
 	RsslEncodeIterator it = RSSL_INIT_ENCODE_ITERATOR;
 #else
-	RsslEncodeIterator it
+	RsslEncodeIterator it;
 	rsslClearEncodeIterator (&it);
 #endif
 	RsslBuffer* buf;

@@ -103,6 +103,7 @@ public:
 
 } /* anonymous namespace */
 
+#ifdef CONFIG_AS_APPLICATION
 int
 main (
 	int		argc,
@@ -117,8 +118,9 @@ main (
 	env_t env (argc, argv);
 	timecaps_t timecaps (1 /* ms */);
 
-	hitsuji::hitsuji_t hitsuji;
-	return hitsuji.Run();
+	auto app = std::make_shared<hitsuji::hitsuji_t>();
+	return app->Run();
 }
+#endif /* CONFIG_AS_APPLICATION */
 
 /* eof */

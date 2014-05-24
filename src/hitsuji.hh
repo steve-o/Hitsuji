@@ -14,43 +14,85 @@
 #define HITSUJI_HH_
 
 #include <cstdint>
+#include <list>
 #include <memory>
+
+/* Boost Atomics */
+#include <boost/atomic.hpp>
 
 /* Boost noncopyable base class */
 #include <boost/utility.hpp>
 
+/* Boost threading */
+#include <boost/thread.hpp>
+
+/* Velocity Analytics Plugin Framework */
+#include <vpf/vpf.h>
+
 #include "config.hh"
-#include "provider.hh"
 
 namespace hitsuji
 {
-	class upa_t;
 	class provider_t;
+	class upa_t;
 
-	class hitsuji_t :
-		boost::noncopyable
+	class hitsuji_t
+		: public std::enable_shared_from_this<hitsuji_t>
+#ifndef CONFIG_AS_APPLICATION
+		, public vpf::AbstractUserPlugin
+		, public vpf::Command
+#endif
+		, boost::noncopyable
 	{
 	public:
 		hitsuji_t();
-		~hitsuji_t();
+		virtual ~hitsuji_t();
 
+#ifndef CONFIG_AS_APPLICATION
+/* Plugin entry point. */
+		virtual void init (const vpf::UserPluginConfig& config_) override;
+/* Plugin termination point. */
+		virtual void destroy() override;
+/* Tcl entry point. */
+		virtual int execute (const vpf::CommandInfo& cmdInfo, vpf::TCLCommandData& cmdData) override;
+#else
 /* Run the provider with the given command-line parameters.
  * Returns the error code to be returned by main().
  */
 		int Run();
-		void Clear();
+		void Quit();
+#endif
 
+		bool Initialize();
+		void Reset();
+
+/* Global list of all instances.  AE owns pointer. */
+		static std::list<hitsuji_t*> global_list_;
+		static boost::shared_mutex global_list_lock_;
 	private:
-
 /* Run core event loop. */
 		void MainLoop();
 
+		bool Start();
+		void Stop();
+
+/* Mainloop procesing thread. */
+		std::unique_ptr<boost::thread> event_thread_;
+
+/* Asynchronous shutdown notification mechanism. */
+		boost::condition_variable mainloop_cond_;
+		boost::mutex mainloop_lock_;
+		bool mainloop_shutdown_;
+		boost::atomic_bool shutting_down_;
+/* Plugin Xml identifiers. */
+		std::string plugin_id_, plugin_type_;
+/* Unique instance number per process. */
+		unsigned instance_;
+		static boost::atomic_uint instance_count_;
 /* Application configuration. */
 		config_t config_;
-
 /* UPA context. */
 		std::shared_ptr<upa_t> upa_;
-
 /* UPA provider */
 		std::shared_ptr<provider_t> provider_;	
 	};

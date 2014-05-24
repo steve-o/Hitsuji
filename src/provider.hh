@@ -121,9 +121,10 @@ namespace hitsuji
 		provider_t (const config_t& config, std::shared_ptr<upa_t> upa);
 		~provider_t();
 
-		bool Init();
-
+		bool Initialize();
+/* Run the current MessageLoop. This blocks until Quit is called. */
 		void Run();
+/* Quit an earlier call to Run(). */
 		void Quit();
 		void Close();
 
@@ -183,7 +184,7 @@ namespace hitsuji
 		std::shared_ptr<upa_t> upa_;
 		RsslServer* rssl_sock_;
 /* This flag is set to false when Run should return. */
-		bool keep_running_;
+		boost::atomic_bool keep_running_;
 
 		int in_nfds_, out_nfds_;
 		fd_set in_rfds_, in_wfds_, in_efds_;

@@ -1,13 +1,7 @@
-/* UPA interactive fake snapshot provider.
- *
- * An interactive provider sits listening on a port for RSSL connections,
- * once a client is connected requests may be submitted for snapshots or
- * subscriptions to item streams.  This application will broadcast updates
- * continuously independent of client interest and the provider side will
- * perform fan-out as required.
- *
- * The provider is not required to perform last value caching, forcing the
- * client to wait for a subsequent broadcast to actually see data.
+/* UPA interactive fake snapshot provider.  Fake snapshots are convenient for
+ * consumption in TR products such as Eikon, DataView, RsslSinkApp.
+ * Surprisingly non-streaming requests in RIS are implemented as fake
+ * snapshots.
  */
 
 #ifndef HITSUJI_HH_
@@ -37,9 +31,12 @@ namespace hitsuji
 	class upa_t;
 
 	class hitsuji_t
+/* Permit global weak pointer to application instance for shutdown notification. */
 		: public std::enable_shared_from_this<hitsuji_t>
 #ifndef CONFIG_AS_APPLICATION
+/* SearchEngine plugin interface. */
 		, public vpf::AbstractUserPlugin
+/* Tcl API interface. */
 		, public vpf::Command
 #endif
 		, boost::noncopyable
@@ -56,23 +53,27 @@ namespace hitsuji
 /* Tcl entry point. */
 		virtual int execute (const vpf::CommandInfo& cmdInfo, vpf::TCLCommandData& cmdData) override;
 #else
-/* Run the provider with the given command-line parameters.
- * Returns the error code to be returned by main().
+/* Run as an application.  Blocks until Quit is called.  Returns the error code
+ * to be returned by main().
  */
 		int Run();
+/* Quit an earlier call to Run(). */
 		void Quit();
 #endif
 
 		bool Initialize();
 		void Reset();
 
-/* Global list of all instances.  AE owns pointer. */
+/* Global list of all instances.  SearchEngine.exe owns pointer. */
 		static std::list<hitsuji_t*> global_list_;
 		static boost::shared_mutex global_list_lock_;
 	private:
 /* Run core event loop. */
 		void MainLoop();
 
+/* Start the encapsulated provider instance until Stop is called.  Stop may be
+ * called to pre-emptively prevent execution.
+ */
 		bool Start();
 		void Stop();
 
@@ -83,6 +84,7 @@ namespace hitsuji
 		boost::condition_variable mainloop_cond_;
 		boost::mutex mainloop_lock_;
 		bool mainloop_shutdown_;
+/* Flag to indicate Stop has be called and thus prohibit start of new provider. */
 		boost::atomic_bool shutting_down_;
 /* Plugin Xml identifiers. */
 		std::string plugin_id_, plugin_type_;

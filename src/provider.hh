@@ -1,4 +1,4 @@
-/* UPA provider.
+/* UPA interactive provider.
  */
 
 #ifndef PROVIDER_HH_

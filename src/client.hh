@@ -85,6 +85,7 @@ namespace hitsuji
 		bool Initialize();
 		bool Close();
 
+/* RSSL client socket */
 		RsslChannel*const GetHandle() const {
 			return handle_;
 		}
@@ -141,7 +142,7 @@ namespace hitsuji
 
 		std::shared_ptr<provider_t> provider_;
 
-/* unique id per connection. */
+/* unique id per connection for trace. */
 		std::string prefix_;
 
 /* client details. */
@@ -156,13 +157,12 @@ namespace hitsuji
 /* Watchlist of all items. */
 //		std::unordered_map<rfa::sessionLayer::RequestToken*const, std::weak_ptr<item_stream_t>> items_;
 
-/* Pre-allocated parsing state */
+/* Pre-allocated parsing state for requested items. */
 		std::string url_, value_;
 		std::string underlying_symbol_;
 		std::istringstream iss_;
 
-/* Item requests may appear before login success has been granted.
- */
+/* Item requests may appear before login success has been granted. */
 		bool is_logged_in_;
 		int32_t login_token_;
 /* RSSL keepalive state. */

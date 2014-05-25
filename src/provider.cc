@@ -1,6 +1,4 @@
-/* UPA provider.
- *
- * One single provider, and hence wraps a RSSL socket for simplicity.
+/* UPA interactive provider.
  */
 
 #include "provider.hh"
@@ -14,7 +12,7 @@
 #include "upaostream.hh"
 #include "client.hh"
 
-/* Reuters Wire Format nomenclature for dictionary names. */
+/* Reuters Wire Format nomenclature for RDM dictionary names. */
 static const std::string kRdmFieldDictionaryName ("RWFFld");
 static const std::string kEnumTypeDictionaryName ("RWFEnum");
 
@@ -449,7 +447,7 @@ hitsuji::provider_t::OnCanReadWithoutBlocking (
 	switch (c->state) {
 	case RSSL_CH_STATE_CLOSED:
 		LOG(INFO) << "socket state is closed.";
-/* raise internal exception flags to remove socket */
+/* Raise internal exception flags to remove socket */
 		Abort (c);
 		break;
 	case RSSL_CH_STATE_INACTIVE:
@@ -478,7 +476,9 @@ hitsuji::provider_t::OnInitializingState (
 	RsslError rssl_err;
 	RsslRet rc;
 
-/* rsslClearError (&rssl_err); */
+	DCHECK (nullptr != c);
+
+/* In place of absent API: rsslClearError (&rssl_err); */
 	rssl_err.rsslErrorId = 0;
 	rssl_err.sysError = 0;
 	rssl_err.text[0] = '\0';
@@ -514,12 +514,12 @@ hitsuji::provider_t::OnCanWriteWithoutBlocking (
 	RsslChannel* c
 	)
 {
-	DCHECK (nullptr != c);
-
 	RsslError rssl_err;
 	RsslRet rc;
 
-/* rsslClearError (&rssl_err); */
+	DCHECK (nullptr != c);
+
+/* In place of absent API: rsslClearError (&rssl_err); */
 	rssl_err.rsslErrorId = 0;
 	rssl_err.sysError = 0;
 	rssl_err.text[0] = '\0';
@@ -563,9 +563,10 @@ hitsuji::provider_t::Close (
 	RsslChannel* c
 	)
 {
+	RsslError rssl_err;
+
 	DCHECK (nullptr != c);
 
-	RsslError rssl_err;
 	LOG(INFO) << "Closing RSSL connection.";
 	if (RSSL_RET_SUCCESS != rsslCloseChannel (c, &rssl_err)) {
 		LOG(WARNING) << "rsslCloseChannel: { "
@@ -586,6 +587,7 @@ hitsuji::provider_t::OnActiveClientSession (
 	RsslChannel* c
 	)
 {
+	DCHECK (nullptr != c);
 	cumulative_stats_[PROVIDER_PC_OMM_ACTIVE_CLIENT_SESSION_RECEIVED]++;
 	try {
 		auto handle = c;
@@ -614,11 +616,13 @@ hitsuji::provider_t::OnActiveState (
 	RsslError rssl_err;
 	RsslRet rc;
 
+	DCHECK (nullptr != c);
+
 	rsslClearReadInArgs (&in_args);
 
 	if (logging::DEBUG_MODE) {
 		rsslClearReadOutArgs (&out_args);
-/* rsslClearError (&rssl_err); */
+/* In place of absent API: rsslClearError (&rssl_err); */
 		rssl_err.rsslErrorId = 0;
 		rssl_err.sysError = 0;
 		rssl_err.text[0] = '\0';
@@ -715,7 +719,7 @@ check_closed_state:
 void
 hitsuji::provider_t::OnMsg (
 	RsslChannel* handle,
-	RsslBuffer* buf
+	RsslBuffer* buf		/* nullptr indicates a partially received fragmented message and thus invalid for processing */
 	)
 {
 #ifndef NDEBUG
@@ -728,6 +732,9 @@ hitsuji::provider_t::OnMsg (
 	rsslClearMsg (&msg);
 #endif
 	RsslRet rc;
+
+	DCHECK(handle != nullptr);
+	DCHECK(buf != nullptr);
 
 /* Prepare codec */
 	rc = rsslSetDecodeIteratorRWFVersion (&it, handle->majorVersion, handle->minorVersion);
@@ -860,16 +867,16 @@ hitsuji::provider_t::AcceptClientSession (
 	if (0 == min_rwf_version_)
 	{
 		LOG(INFO) << "Setting RWF: { "
-				  "\"MajorVersion\": " << (unsigned)client->GetRwfMajorVersion() <<
-				", \"MinorVersion\": " << (unsigned)client->GetRwfMinorVersion() <<
+				  "\"MajorVersion\": " << static_cast<unsigned> (client->GetRwfMajorVersion()) <<
+				", \"MinorVersion\": " << static_cast<unsigned> (client->GetRwfMinorVersion()) <<
 				" }";
 		min_rwf_version_.store (client_rwf_version);
 	}
 	else if (min_rwf_version_ > client_rwf_version)
 	{
 		LOG(INFO) << "Degrading RWF: { "
-				  "\"MajorVersion\": " << (unsigned)client->GetRwfMajorVersion() <<
-				", \"MinorVersion\": " << (unsigned)client->GetRwfMinorVersion() <<
+				  "\"MajorVersion\": " << static_cast<unsigned> (client->GetRwfMajorVersion()) <<
+				", \"MinorVersion\": " << static_cast<unsigned> (client->GetRwfMinorVersion()) <<
 				" }";
 		min_rwf_version_.store (client_rwf_version);
 	}
@@ -918,7 +925,7 @@ hitsuji::provider_t::EraseClientSession (
 bool
 hitsuji::provider_t::GetDirectoryMap (
 	RsslEncodeIterator*const it,
-	const char* service_name,
+	const char* service_name,	/* nullptr for all services */
 	uint32_t filter_mask,
 	unsigned map_action
 	)
@@ -933,6 +940,8 @@ hitsuji::provider_t::GetDirectoryMap (
 	rsslClearMapEntry (&map_entry);
 #endif
 	RsslRet rc;
+
+	DCHECK(nullptr != it);
 
 	map.keyPrimitiveType = RSSL_DT_UINT;
 	map.containerType    = RSSL_DT_FILTER_LIST;
@@ -1000,10 +1009,11 @@ hitsuji::provider_t::GetDirectoryMap (
 bool
 hitsuji::provider_t::GetServiceDirectory (
 	RsslEncodeIterator*const it,
-	const char* service_name,
+	const char* service_name,	/* nullptr for all services */
 	uint32_t filter_mask
 	)
 {
+	DCHECK(nullptr != it);
 /* Request service filter does not match provided service. */
 	if (nullptr != service_name && 0 != strcmp (service_name, config_.service_name.c_str()))
 	{
@@ -1030,6 +1040,8 @@ hitsuji::provider_t::GetServiceFilterList (
 	rsslClearFilterList (&filter_list);
 #endif
 	RsslRet rc;
+
+	DCHECK(nullptr != it);
 
 /* Determine entry count for encoder hinting */
 	const bool use_info_filter  = (0 != (filter_mask & RDM_DIRECTORY_SERVICE_INFO_FILTER));
@@ -1157,6 +1169,8 @@ hitsuji::provider_t::GetServiceInformation (
 	rsslClearBuffer (&data_buffer);
 #endif
 	RsslRet rc;
+
+	DCHECK(nullptr != it);
 
 	element_list.flags = RSSL_ELF_HAS_STANDARD_DATA;
 	rc = rsslEncodeElementListInit (it, &element_list, nullptr /* no dictionary */, 0);
@@ -1320,6 +1334,8 @@ hitsuji::provider_t::GetServiceCapabilities (
 #endif
 	RsslRet rc;
 
+	DCHECK(nullptr != it);
+
 	rssl_array.primitiveType = RSSL_DT_UINT;
 	rssl_array.itemLength    = 1;	// one byte for domain type
 	rc = rsslEncodeArrayInit (it, &rssl_array);
@@ -1374,6 +1390,8 @@ hitsuji::provider_t::GetServiceDictionaries (
 	rsslClearBuffer (&data_buffer);
 #endif
 	RsslRet rc;
+
+	DCHECK(nullptr != it);
 
 	rssl_array.primitiveType = RSSL_DT_ASCII_STRING;
 	rssl_array.itemLength    = 0;	// variable length string
@@ -1451,6 +1469,8 @@ hitsuji::provider_t::GetServiceQoS (
 #endif
 	RsslRet rc;
 
+	DCHECK(nullptr != it);
+
 	rssl_array.primitiveType = RSSL_DT_QOS;
 	rssl_array.itemLength    = 0;
 	rc = rsslEncodeArrayInit (it, &rssl_array);
@@ -1511,6 +1531,8 @@ hitsuji::provider_t::GetServiceState (
 	rsslClearElementEntry (&element);
 #endif
 	RsslRet rc;
+
+	DCHECK(nullptr != it);
 
 	element_list.flags = RSSL_ELF_HAS_STANDARD_DATA;
 	rc = rsslEncodeElementListInit (it, &element_list, nullptr /* no dictionary */, 0 /* maximum size */);
@@ -1593,6 +1615,9 @@ hitsuji::provider_t::Submit (
 	RsslError rssl_err;
 	RsslRet rc;
 
+	DCHECK(nullptr != c);
+	DCHECK(nullptr != buf);
+
 	rsslClearWriteInArgs (&in_args);
 	in_args.rsslPriority = RSSL_LOW_PRIORITY;	/* flushing priority */
 /* direct write on clear socket, enqueue when writes are pending */
@@ -1671,7 +1696,10 @@ hitsuji::provider_t::Ping (
 	RsslError rssl_err;
 	RsslRet rc;
 
+	DCHECK(nullptr != c);
+
 	if (logging::DEBUG_MODE) {
+/* In place of absent API: rsslClearError (&rssl_err); */
 		rssl_err.rsslErrorId = 0;
 		rssl_err.sysError = 0;
 		rssl_err.text[0] = '\0';

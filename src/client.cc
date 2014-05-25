@@ -15,7 +15,7 @@
 #include "provider.hh"
 #include "rounding.hh"
 
-
+/* Maximum encoded size of an RSSL provider to client message. */
 #define MAX_MSG_SIZE 4096
 
 /* RDM FIDs. */
@@ -134,8 +134,8 @@ hitsuji::client_t::Initialize()
 		  "\"clientHostname\": " << client_hostname.str() << ""
 		", \"clientIP\": " << client_ip.str() << ""
 		", \"connectionType\": \"" << internal::connection_type_string (handle_->connectionType) << "\""
-		", \"majorVersion\": " << (unsigned)GetRwfMajorVersion() << ""
-		", \"minorVersion\": " << (unsigned)GetRwfMinorVersion() << ""
+		", \"majorVersion\": " << static_cast<unsigned> (GetRwfMajorVersion()) << ""
+		", \"minorVersion\": " << static_cast<unsigned> (GetRwfMinorVersion()) << ""
 		", \"pingTimeout\": " << handle_->pingTimeout << ""
 		", \"protocolType\": " << handle_->protocolType << ""
 		", \"socketId\": " << handle_->socketId << ""
@@ -210,6 +210,7 @@ hitsuji::client_t::OnRequestMsg (
 	const RsslRequestMsg* request_msg
 	)
 {
+	DCHECK (nullptr != request_msg);
 	cumulative_stats_[CLIENT_PC_REQUEST_MSGS_RECEIVED]++;
 	switch (request_msg->msgBase.domainType) {
 	case RSSL_DMT_LOGIN:
@@ -263,6 +264,7 @@ hitsuji::client_t::OnLoginRequest (
 	const RsslRequestMsg* login_msg
 	)
 {
+	DCHECK (nullptr != login_msg);
 	cumulative_stats_[CLIENT_PC_MMT_LOGIN_RECEIVED]++;
 
 	static const uint16_t streaming_request = RSSL_RQMF_STREAMING;
@@ -347,6 +349,7 @@ hitsuji::client_t::RejectLogin (
 	RsslError rssl_err;
 	RsslRet rc;
 
+	DCHECK (nullptr != login_msg);
 	VLOG(2) << prefix_ << "Sending MMT_LOGIN rejection.";
 
 /* Set the message model type. */
@@ -470,6 +473,7 @@ hitsuji::client_t::AcceptLogin (
 	RsslError rssl_err;
 	RsslRet rc;
 
+	DCHECK (nullptr != login_msg);
 	VLOG(2) << prefix_ << "Sending MMT_LOGIN accepted.";
 
 /* Set the message model type. */
@@ -691,6 +695,7 @@ hitsuji::client_t::OnDirectoryRequest (
 	const RsslRequestMsg* request_msg
 	)
 {
+	DCHECK (nullptr != request_msg);
 	cumulative_stats_[CLIENT_PC_MMT_DIRECTORY_REQUEST_RECEIVED]++;
 
 	static const uint16_t streaming_request = RSSL_RQMF_STREAMING;
@@ -736,6 +741,7 @@ hitsuji::client_t::OnDictionaryRequest (
 	const RsslRequestMsg* request_msg
 	)
 {
+	DCHECK (nullptr != request_msg);
 	cumulative_stats_[CLIENT_PC_MMT_DICTIONARY_REQUEST_RECEIVED]++;
 	LOG(INFO) << prefix_ << "DictionaryRequest:" << request_msg;
 
@@ -754,6 +760,7 @@ hitsuji::client_t::OnItemRequest (
 	const RsslRequestMsg* request_msg
 	)
 {
+	DCHECK (nullptr != request_msg);
 	cumulative_stats_[CLIENT_PC_ITEM_REQUEST_RECEIVED]++;
 	LOG(INFO) << prefix_ << "ItemRequest:" << request_msg;
 
@@ -813,6 +820,7 @@ hitsuji::client_t::OnItemSnapshotRequest (
 	int32_t request_token
 	)
 {
+	DCHECK (nullptr != request_msg);
 	cumulative_stats_[CLIENT_PC_ITEM_SNAPSHOT_REQUEST_RECEIVED]++;
 
 	const uint16_t service_id    = request_msg->msgBase.msgKey.serviceId;
@@ -834,6 +842,7 @@ hitsuji::client_t::OnItemStreamingRequest (
 	int32_t request_token
 	)
 {
+	DCHECK (nullptr != request_msg);
 	cumulative_stats_[CLIENT_PC_ITEM_STREAMING_REQUEST_RECEIVED]++;
 
 	const uint16_t service_id    = request_msg->msgBase.msgKey.serviceId;
@@ -908,6 +917,7 @@ hitsuji::client_t::OnCloseMsg (
 	const RsslCloseMsg* close_msg
 	)
 {
+	DCHECK (nullptr != close_msg);
 	cumulative_stats_[CLIENT_PC_CLOSE_MSGS_RECEIVED]++;
 	switch (close_msg->msgBase.domainType) {
 	case RSSL_DMT_MARKET_PRICE:
@@ -952,6 +962,7 @@ hitsuji::client_t::OnItemClose (
 	const RsslCloseMsg* close_msg
 	)
 {
+	DCHECK (nullptr != close_msg);
 	cumulative_stats_[CLIENT_PC_ITEM_CLOSE_RECEIVED]++;
 	LOG(INFO) << prefix_ << "ItemClose:" << close_msg;
 
@@ -1015,6 +1026,9 @@ hitsuji::client_t::SendInitial (
 	RsslBuffer* buf;
 	RsslError rssl_err;
 	RsslRet rc;
+
+	DCHECK (name_len > 0);
+	DCHECK (nullptr != name);
 
 /* 7.4.8.3 Set the message model type of the response. */
 	response.msgBase.domainType = RSSL_DMT_MARKET_PRICE;
@@ -1483,7 +1497,7 @@ hitsuji::client_t::OnOMMInactiveClientSessionEvent (
 bool
 hitsuji::client_t::SendDirectoryResponse (
 	int32_t request_token,
-	const char* service_name,
+	const char* service_name,	/* can by nullptr */
 	uint32_t filter_mask
 	)
 {
@@ -1654,6 +1668,8 @@ hitsuji::client_t::SendClose (
 	RsslError rssl_err;
 	RsslRet rc;
 
+	DCHECK(name_len > 0);
+	DCHECK(nullptr != name);
 	VLOG(2) << prefix_ << "Sending item close { "
 		  "\"RequestToken\": " << request_token << ""
 		", \"ServiceID\": " << service_id << ""
@@ -1690,8 +1706,11 @@ hitsuji::client_t::SendClose (
 	response.state.streamState = RSSL_STREAM_CLOSED;
 /* Data quality state. */
 	response.state.dataState = RSSL_DATA_OK;
-/* Error code. */
+/* 11.2.6.1 Structure Members
+ * Note: An application should not trigger specific behavior based on this content
+ */
 	response.state.code = status_code;
+	/* response.state.text */ /* Maximum 32,767 bytes, 1-11361563014: text encoding undefined. */
 
 	buf = rsslGetBuffer (handle_, MAX_MSG_SIZE, RSSL_FALSE /* not packed */, &rssl_err);
 	if (nullptr == buf) {
@@ -1771,6 +1790,7 @@ hitsuji::client_t::Submit (
 	RsslBuffer* buf
 	)
 {
+	DCHECK(nullptr != buf);
 	const int status = provider_->Submit (handle_, buf);
 	if (status) cumulative_stats_[CLIENT_PC_RSSL_MSGS_SENT]++;
 	return status;

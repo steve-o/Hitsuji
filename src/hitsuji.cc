@@ -1,4 +1,7 @@
-/* UPA interactive fake snapshot provider.
+/* UPA interactive fake snapshot provider.  Fake snapshots are convenient for
+ * consumption in TR products such as Eikon, DataView, RsslSinkApp.
+ * Surprisingly non-streaming requests in RIS are implemented as fake
+ * snapshots.
  */
 
 #include "hitsuji.hh"
@@ -17,6 +20,7 @@
 /* Global weak pointer to shutdown as application */
 static std::weak_ptr<hitsuji::hitsuji_t> g_application;
 
+/* Global instance counter for generation of unique identifiers */
 boost::atomic_uint hitsuji::hitsuji_t::instance_count_ (0);
 /* List of all instances for external enumeration, e.g. SNMP walk. */
 std::list<hitsuji::hitsuji_t*> hitsuji::hitsuji_t::global_list_;

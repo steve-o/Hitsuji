@@ -17,6 +17,7 @@
 /* UPA 7.4 */
 #include <upa/upa.h>
 
+#include "chromium/debug/leak_tracker.hh"
 #include "upa.hh"
 #include "config.hh"
 #include "deleter.hh"
@@ -183,6 +184,8 @@ namespace hitsuji
 		friend Netsnmp_Next_Data_Point hitsujiClientPerformanceTable_get_next_data_point;
 		friend Netsnmp_Node_Handler hitsujiClientPerformanceTable_handler;
 #endif /* HITSUJIMIB_H */
+
+		chromium::debug::LeakTracker<client_t> leak_tracker_;
 	};
 
 } /* namespace hitsuji */

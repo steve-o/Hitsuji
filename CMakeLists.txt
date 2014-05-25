@@ -163,7 +163,7 @@ add_definitions(
         -DUPA_LIBRARY_VERSION="7.6.0."
 # production release
 	-DOFFICIAL_BUILD
-	-DENABLE_LEAK_TRACKER
+##	-DENABLE_LEAK_TRACKER
 )
 
 if(CONFIG_AS_APPLICATION)

@@ -9,6 +9,7 @@
 /* Boost noncopyable base class */
 #include <boost/utility.hpp>
 
+#include "chromium/debug/leak_tracker.hh"
 #include "config.hh"
 
 namespace hitsuji
@@ -24,7 +25,9 @@ namespace hitsuji
 		bool VerifyVersion();
 
 	private:
-		const config_t& config_;		
+		const config_t& config_;
+
+		chromium::debug::LeakTracker<upa_t> leak_tracker_;
 	};
 
 } /* namespace hitsuji */

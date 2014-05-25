@@ -27,6 +27,7 @@
 /* UPA 7.2 */
 #include <upa/upa.h>
 
+#include "chromium/debug/leak_tracker.hh"
 #include "upa.hh"
 #include "config.hh"
 #include "deleter.hh"
@@ -222,6 +223,8 @@ namespace hitsuji
 		boost::posix_time::ptime creation_time_, last_activity_;
 		uint32_t cumulative_stats_[PROVIDER_PC_MAX];
 		uint32_t snap_stats_[PROVIDER_PC_MAX];
+
+		chromium::debug::LeakTracker<provider_t> leak_tracker_;
 	};
 
 } /* namespace hitsuji */

@@ -121,6 +121,7 @@ int
 hitsuji::hitsuji_t::Run()
 {
 	int rc = EXIT_SUCCESS;
+	VLOG(1) << "Run as application starting.";
 /* Add shutdown handler. */
 	g_application = shared_from_this();
 	::SetConsoleCtrlHandler ((PHANDLER_ROUTINE)::CtrlHandler, TRUE);
@@ -135,6 +136,7 @@ hitsuji::hitsuji_t::Run()
 	}
 /* Remove shutdown handler. */
 	::SetConsoleCtrlHandler ((PHANDLER_ROUTINE)::CtrlHandler, FALSE);
+	VLOG(1) << "Run as application finished.";
 	return rc;
 }
 
@@ -218,14 +220,19 @@ hitsuji::hitsuji_t::Stop()
 void
 hitsuji::hitsuji_t::Reset()
 {
+/* Close client sockets with reference counts on provider. */
 	if ((bool)provider_)
 		provider_->Close();
+/* Release everything with an UPA dependency. */
 	CHECK_LE (provider_.use_count(), 1);
 	provider_.reset();
-	CHECK_EQ (provider_.use_count(), 0);
-/* Release everything with an UPA dependency. */
+/* Final tests before releasing UPA context */
+	chromium::debug::LeakTracker<client_t>::CheckForLeaks();
+	chromium::debug::LeakTracker<provider_t>::CheckForLeaks();
+/* No more UPA sockets so close up context */
 	CHECK_LE (upa_.use_count(), 1);
 	upa_.reset();
+	chromium::debug::LeakTracker<upa_t>::CheckForLeaks();
 }
 
 void

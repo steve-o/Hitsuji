@@ -34,6 +34,14 @@ static const int kRdmDealingCode1Id		= 826;
 static const int kRdmActivityTime1Id		= 1010;
 static const int kRdmActivityDate1Id		= 875;
 
+static const std::string kErrorCloseOnClose = "Close request on closed session.";
+static const std::string kErrorUnsupportedMsgClass = "Unsupported message class.";
+static const std::string kErrorUnsupportedRequest = "Unsupported domain type in request.";
+static const std::string kErrorUnsupportedDictionary = "Unsupported dictionary request.";
+static const std::string kErrorUnsupportedNonStreaming = "Unsupported non-streaming request.";
+static const std::string kErrorLoginRequired = "Login required for request.";
+static const std::string kErrorMalformedRequest = "Malformed request.";
+
 /* http://en.wikipedia.org/wiki/Unix_epoch */
 static const boost::gregorian::date kUnixEpoch (1970, 1, 1);
 
@@ -163,7 +171,8 @@ hitsuji::client_t::Close()
 				  nullptr,
 				  0,
 				  false, /* no AttribInfo in MMT_LOGIN */
-				  RSSL_SC_NONE);
+				  RSSL_SC_NONE,
+				  kErrorCloseOnClose.c_str(), kErrorCloseOnClose.size());
 	} else {
 		return true;
 	}
@@ -199,7 +208,8 @@ hitsuji::client_t::OnMsg (
 				  msg->msgBase.msgKey.name.data,
 				  msg->msgBase.msgKey.name.length,
 				  true, /* always send AttribInfo */
-				  RSSL_SC_USAGE_ERROR);
+				  RSSL_SC_USAGE_ERROR,
+				  kErrorUnsupportedMsgClass.c_str(), kErrorUnsupportedMsgClass.size());
 	}
 }
 
@@ -220,12 +230,12 @@ hitsuji::client_t::OnRequestMsg (
 	case RSSL_DMT_DICTIONARY:
 		return OnDictionaryRequest (request_msg);
 	case RSSL_DMT_MARKET_PRICE:
+		return OnItemRequest (request_msg);
 	case RSSL_DMT_MARKET_BY_ORDER:
 	case RSSL_DMT_MARKET_BY_PRICE:
 	case RSSL_DMT_MARKET_MAKER:
 	case RSSL_DMT_SYMBOL_LIST:
 	case RSSL_DMT_YIELD_CURVE:
-		return OnItemRequest (request_msg);
 	default:
 		cumulative_stats_[CLIENT_PC_REQUEST_MSGS_REJECTED]++;
 		LOG(WARNING) << prefix_ << "Uncaught request message: " << request_msg;
@@ -236,7 +246,8 @@ hitsuji::client_t::OnRequestMsg (
 				  request_msg->msgBase.msgKey.name.data,
 				  request_msg->msgBase.msgKey.name.length,
 				  RSSL_RQMF_MSG_KEY_IN_UPDATES == (request_msg->flags & RSSL_RQMF_MSG_KEY_IN_UPDATES),
-				  RSSL_SC_USAGE_ERROR);
+				  RSSL_SC_USAGE_ERROR,
+				  kErrorUnsupportedRequest.c_str(), kErrorUnsupportedRequest.size());
 	}
 }
 
@@ -752,7 +763,8 @@ hitsuji::client_t::OnDictionaryRequest (
 			  request_msg->msgBase.msgKey.name.data,
 			  request_msg->msgBase.msgKey.name.length,
 			  RSSL_RQMF_MSG_KEY_IN_UPDATES == (request_msg->flags & RSSL_RQMF_MSG_KEY_IN_UPDATES),
-			  RSSL_SC_USAGE_ERROR);
+			  RSSL_SC_USAGE_ERROR,
+			  kErrorUnsupportedDictionary.c_str(), kErrorUnsupportedDictionary.size());
 }
 
 bool
@@ -788,18 +800,11 @@ hitsuji::client_t::OnItemRequest (
 		cumulative_stats_[CLIENT_PC_ITEM_REQUEST_REJECTED]++;
 		cumulative_stats_[CLIENT_PC_ITEM_REQUEST_BEFORE_LOGIN]++;
 		LOG(INFO) << prefix_ << "Closing request for client without accepted login.";
-		return SendClose (request_token, service_id, model_type, item_name, item_name_len, use_attribinfo_in_updates, RSSL_SC_USAGE_ERROR);
+		return SendClose (request_token, service_id, model_type, item_name, item_name_len, use_attribinfo_in_updates,
+					RSSL_SC_USAGE_ERROR, kErrorLoginRequired.c_str(), kErrorLoginRequired.size());
 	}
 
-/* Only accept MMT_MARKET_PRICE. */
-	if (RSSL_DMT_MARKET_PRICE != model_type)
-	{
-		cumulative_stats_[CLIENT_PC_ITEM_REQUEST_REJECTED]++;
-		cumulative_stats_[CLIENT_PC_ITEM_REQUEST_MALFORMED]++;
-		LOG(INFO) << prefix_ << "Closing request for unsupported message model type.";
-		return SendClose (request_token, service_id, model_type, item_name, item_name_len, use_attribinfo_in_updates, RSSL_SC_NOT_ENTITLED);
-	}
-
+	CHECK(RSSL_DMT_MARKET_PRICE == model_type);
 	const bool is_streaming_request = (RSSL_RQMF_STREAMING == (request_msg->flags & RSSL_RQMF_STREAMING));
 
 	if (is_streaming_request)
@@ -833,7 +838,8 @@ hitsuji::client_t::OnItemSnapshotRequest (
 	cumulative_stats_[CLIENT_PC_ITEM_REQUEST_REJECTED]++;
 	cumulative_stats_[CLIENT_PC_ITEM_REQUEST_MALFORMED]++;
 	LOG(INFO) << prefix_ << "Rejecting unsupported snapshot request.";
-	return SendClose (request_token, service_id, model_type, item_name, item_name_len, use_attribinfo_in_updates, RSSL_SC_NOT_ENTITLED);
+	return SendClose (request_token, service_id, model_type, item_name, item_name_len, use_attribinfo_in_updates,
+				RSSL_SC_NOT_ENTITLED, kErrorUnsupportedNonStreaming.c_str(), kErrorUnsupportedNonStreaming.size());
 }
 
 bool
@@ -864,7 +870,8 @@ hitsuji::client_t::OnItemStreamingRequest (
 		cumulative_stats_[CLIENT_PC_ITEM_REQUEST_REJECTED]++;
 		cumulative_stats_[CLIENT_PC_ITEM_REQUEST_MALFORMED]++;
 		LOG(INFO) << prefix_ << "Closing invalid request for \"" << std::string (item_name, item_name_len) << "\"";
-		return SendClose (request_token, service_id, model_type, item_name, item_name_len, use_attribinfo_in_updates, RSSL_SC_NOT_ENTITLED);
+		return SendClose (request_token, service_id, model_type, item_name, item_name_len, use_attribinfo_in_updates,
+					RSSL_SC_NOT_ENTITLED, kErrorMalformedRequest.c_str(), kErrorMalformedRequest.size());
 	}
 /* require a NULL terminated string */
 	underlying_symbol_.assign (url_.c_str() + file_name.begin, file_name.len);
@@ -1651,7 +1658,9 @@ hitsuji::client_t::SendClose (
 	const char* name,
 	size_t name_len,
 	bool use_attribinfo_in_updates,
-	uint8_t status_code
+	uint8_t status_code,
+	const char* text,
+	size_t text_len
 	)
 {
 	RsslStatusMsg response = RSSL_INIT_STATUS_MSG;
@@ -1678,6 +1687,7 @@ hitsuji::client_t::SendClose (
 		", \"NameLen\": " << name_len << ""
 		", \"AttribInfoInUpdates\": " << (use_attribinfo_in_updates ? "true" : "false") << ""
 		", \"StatusCode\": " << rsslStateCodeToString (status_code) << ""
+		", \"StatusText\": \"" << std::string (text, text_len) << "\""
 		" }";
 
 /* 7.5.9.2 Set the message model type of the response. */

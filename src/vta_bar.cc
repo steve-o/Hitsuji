@@ -7,6 +7,8 @@
 #include <FlexRecReader.h>
 
 #include "chromium/logging.hh"
+#include "chromium/string_piece.hh"
+#include "googleurl/url_parse.h"
 #include "upaostream.hh"
 #include "unix_epoch.hh"
 #include "rounding.hh"
@@ -25,14 +27,16 @@ static const int kRdmNumberTradesId		= 77;
 static const uint32_t kTradeId			= 40001;
 /* Flex Record name for trades */
 static const char* kTradeRecord			= "Trade";
-
 /* Offsets for Flex Record fields */
 static const int kFRLastPrice			= kFRFixedFields + 0;
 static const int kFRTickVolume			= kFRFixedFields + 19;
-
 /* Field names */
 static const char* kLastPriceField		= "LastPrice";
 static const char* kTickVolumeField		= "TickVolume";
+
+/* RIC request fields. */
+static const char* kOpenParameter		= "open";
+static const char* kCloseParameter		= "close";
 
 /* Nul values for fast copying */
 static const boost::accumulators::accumulator_set<double,
@@ -50,11 +54,41 @@ vta::bar_t::bar_t (
 	uint16_t rwf_version,
 	int32_t token, 
 	uint16_t service_id,
-	const std::string& name,
-	const boost::posix_time::time_period& tp
+	const std::string& item_name
 	)
-	: super (prefix, rwf_version, token, service_id, name, tp)
+	: super (prefix, rwf_version, token, service_id, item_name)
 {
+	url_parse::Parsed parsed;
+	std::string url, value;
+	std::istringstream iss;
+/* decompose request */
+	url.assign ("null://localhost/");
+	url.append (item_name);
+	url_parse::ParseStandardURL (url.c_str(), static_cast<int>(url.size()), &parsed);
+	DCHECK(parsed.path.is_valid());
+	using namespace boost::gregorian;
+    	using namespace boost::posix_time;
+	if (parsed.query.is_valid()) {
+		url_parse::Component query = parsed.query;
+		url_parse::Component key_range, value_range;
+		ptime t;
+/* For each key-value pair, i.e. ?a=x&b=y&c=z -> (a,x) (b,y) (c,z) */
+		while (url_parse::ExtractQueryKeyValue (url.c_str(), &query, &key_range, &value_range))
+		{
+/* Lazy std::string conversion for key. */
+			const chromium::StringPiece key (url.c_str() + key_range.begin, key_range.len);
+/* Value must convert to add NULL terminator for conversion APIs. */
+			value.assign (url.c_str() + value_range.begin, value_range.len);
+			if (key == kOpenParameter) {
+/* Disabling exceptions in boost::posix_time::time_duration requires stringstream which requires a string to initialise. */
+				iss.str (value);
+				if (iss >> t) open_time_ = t;
+			} else if (key == kCloseParameter) {
+				iss.str (value);
+				if (iss >> t) close_time_ = t;
+			}
+		}
+	}
 }
 
 vta::bar_t::~bar_t()
@@ -86,13 +120,12 @@ vta::bar_t::Calculate (
 	binding.Bind (kTickVolumeField, &tick_volume);
 	binding_set.insert (binding);
 /* Time period */
-	const __time32_t from = internal::to_unix_epoch (time_period().begin());
-	const __time32_t till = internal::to_unix_epoch (time_period().end());
+	const __time32_t from = internal::to_unix_epoch (open_time());
+	const __time32_t till = internal::to_unix_epoch (close_time());
 /* Open cursor */
 	FlexRecReader fr;
 	try {
 		char error_text[1024];
-LOG(INFO) << "FlexRecReader::Open (" << from << ", " << till << ")";
 		const int cursor_status = fr.Open (symbol_set, binding_set, from, till, 0 /* forward */, 0 /* no limit */, error_text);
 		if (1 != cursor_status) {
 			LOG(ERROR) << prefix_ << "FlexRecReader::Open failed { \"code\": " << cursor_status
@@ -105,13 +138,10 @@ LOG(INFO) << "FlexRecReader::Open (" << from << ", " << till << ")";
 		return false;
 	}
 /* iterate through all ticks */
-int x = 0;
 	while (fr.Next()) {
-++x;
 		last_price_ (last_price);
 		tick_volume_ (tick_volume);
 	}
-LOG(INFO) << x << " ticks";
 /* Cleanup */
 	fr.Close();
 /* State now represents valid data. */
@@ -131,8 +161,8 @@ vta::bar_t::Calculate(
 	)
 {
 /* Time period */
-	const __time32_t from = internal::to_unix_epoch (time_period().begin());
-	const __time32_t till = internal::to_unix_epoch (time_period().end());
+	const __time32_t from = internal::to_unix_epoch (open_time());
+	const __time32_t till = internal::to_unix_epoch (close_time());
 
 	DVLOG(4) << prefix_ << "from: " << from << " till: " << till;
 	try {
@@ -172,7 +202,7 @@ vta::bar_t::WriteRaw (
 	RsslBuffer buf = { static_cast<uint32_t> (*length), data };
 	RsslRet rc;
 
-	DCHECK(!name().empty());
+	DCHECK(!item_name().empty());
 
 /* 7.4.8.3 Set the message model type of the response. */
 	response.msgBase.domainType = RSSL_DMT_MARKET_PRICE;
@@ -188,8 +218,8 @@ vta::bar_t::WriteRaw (
 /* 7.4.8.2 Create or re-use a request attribute object (4.2.4) */
 	response.msgBase.msgKey.serviceId   = service_id();
 	response.msgBase.msgKey.nameType    = RDM_INSTRUMENT_NAME_TYPE_RIC;
-	response.msgBase.msgKey.name.data   = const_cast<char*> (name().c_str());
-	response.msgBase.msgKey.name.length = static_cast<uint32_t> (name().size());
+	response.msgBase.msgKey.name.data   = const_cast<char*> (item_name().c_str());
+	response.msgBase.msgKey.name.length = static_cast<uint32_t> (item_name().size());
 	response.msgBase.msgKey.flags = RSSL_MKF_HAS_SERVICE_ID | RSSL_MKF_HAS_NAME_TYPE | RSSL_MKF_HAS_NAME;
 	response.flags |= RSSL_RFMF_HAS_MSG_KEY;
 /* Set the request token. */

@@ -10,7 +10,6 @@
 
 #include "chromium/logging.hh"
 #include "chromium/string_piece.hh"
-#include "googleurl/url_parse.h"
 #include "upaostream.hh"
 #include "provider.hh"
 
@@ -151,6 +150,7 @@ hitsuji::client_t::Close()
 				    nullptr,
 				    0,
 				    false, /* no AttribInfo in MMT_LOGIN */
+				    RSSL_STREAM_CLOSED,
 				    RSSL_SC_NONE,
 				    kErrorNone);
 	} else {
@@ -188,6 +188,7 @@ hitsuji::client_t::OnMsg (
 				  msg->msgBase.msgKey.name.data,
 				  msg->msgBase.msgKey.name.length,
 				  true, /* always send AttribInfo */
+				  RSSL_STREAM_CLOSED,
 				  RSSL_SC_USAGE_ERROR,
 				  kErrorUnsupportedMsgClass);
 	}
@@ -226,6 +227,7 @@ hitsuji::client_t::OnRequestMsg (
 				  request_msg->msgBase.msgKey.name.data,
 				  request_msg->msgBase.msgKey.name.length,
 				  RSSL_RQMF_MSG_KEY_IN_UPDATES == (request_msg->flags & RSSL_RQMF_MSG_KEY_IN_UPDATES),
+				  RSSL_STREAM_CLOSED,
 				  RSSL_SC_USAGE_ERROR,
 				  kErrorUnsupportedRequest);
 	}
@@ -743,6 +745,7 @@ hitsuji::client_t::OnDictionaryRequest (
 			  request_msg->msgBase.msgKey.name.data,
 			  request_msg->msgBase.msgKey.name.length,
 			  RSSL_RQMF_MSG_KEY_IN_UPDATES == (request_msg->flags & RSSL_RQMF_MSG_KEY_IN_UPDATES),
+			  RSSL_STREAM_CLOSED,
 			  RSSL_SC_USAGE_ERROR,
 			  kErrorUnsupportedDictionary);
 }
@@ -780,29 +783,27 @@ hitsuji::client_t::OnItemRequest (
 		cumulative_stats_[CLIENT_PC_ITEM_REQUEST_BEFORE_LOGIN]++;
 		LOG(INFO) << prefix_ << "Closing request for client without accepted login.";
 		return SendClose (request_token, service_id, model_type, item_name.c_str(), item_name.size(), use_attribinfo_in_updates,
-					RSSL_SC_USAGE_ERROR, kErrorLoginRequired);
+					RSSL_STREAM_CLOSED, RSSL_SC_USAGE_ERROR, kErrorLoginRequired);
 	}
 
 /* Filtered before entry. */
 	CHECK(RSSL_DMT_MARKET_PRICE == model_type);
 
 /* decompose request */
-	url_parse::Parsed parsed;
-	url_parse::Component file_name;
-	url_.assign ("vta://localhost/");
+	url_.assign ("null://localhost/");
 	url_.append (item_name);
-	url_parse::ParseStandardURL (url_.c_str(), static_cast<int>(url_.size()), &parsed);
-	if (parsed.path.is_valid())
-		url_parse::ExtractFileName (url_.c_str(), parsed.path, &file_name);
-	if (!file_name.is_valid()) {
+	url_parse::ParseStandardURL (url_.c_str(), static_cast<int>(url_.size()), &parsed_);
+	if (parsed_.path.is_valid())
+		url_parse::ExtractFileName (url_.c_str(), parsed_.path, &file_name_);
+	if (!file_name_.is_valid()) {
 		cumulative_stats_[CLIENT_PC_ITEM_REQUEST_REJECTED]++;
 		cumulative_stats_[CLIENT_PC_ITEM_REQUEST_MALFORMED]++;
 		LOG(INFO) << prefix_ << "Closing invalid request for \"" << item_name << "\"";
 		return SendClose (request_token, service_id, model_type, item_name.c_str(), item_name.size(), use_attribinfo_in_updates,
-					RSSL_SC_NOT_FOUND, kErrorMalformedRequest);
+					RSSL_STREAM_CLOSED, RSSL_SC_NOT_FOUND, kErrorMalformedRequest);
 	}
 /* require a NULL terminated string */
-	underlying_symbol_.assign (url_.c_str() + file_name.begin, file_name.len);
+	underlying_symbol_.assign (url_.c_str() + file_name_.begin, file_name_.len);
 
 	const bool is_streaming_request = (RSSL_RQMF_STREAMING == (request_msg->flags & RSSL_RQMF_STREAMING));
 	const uint8_t stream_state = is_streaming_request ? RSSL_STREAM_OPEN : RSSL_STREAM_NON_STREAMING;
@@ -811,23 +812,20 @@ hitsuji::client_t::OnItemRequest (
 	} else {
 		cumulative_stats_[CLIENT_PC_ITEM_SNAPSHOT_REQUEST_RECEIVED]++;
 	}
+#ifndef CONFIG_AS_APPLICATION
 /* Check SearchEngine.exe inventory */
 	if (0 == TBPrimitives::IsSymbolExists (underlying_symbol_.c_str())) {
 		cumulative_stats_[CLIENT_PC_ITEM_NOT_FOUND]++;
 		cumulative_stats_[CLIENT_PC_ITEM_REQUEST_REJECTED]++;
 		LOG(INFO) << prefix_ << "Closing request for unknown item \"" << underlying_symbol_ << "\".";
 		return SendClose (request_token, service_id, model_type, item_name.c_str(), item_name.size(), use_attribinfo_in_updates,
-					RSSL_SC_NOT_FOUND, kErrorNotFound);
+					RSSL_STREAM_CLOSED, RSSL_SC_NOT_FOUND, kErrorNotFound);
 	}
-	using namespace boost::gregorian;
-    	using namespace boost::posix_time;
-	const date d (day_clock::universal_day());
-	const ptime t1 (d, hours (14)), t2 (d, hours (15));
-	const time_period tp (t1, t2);
-	vta::bar_t vta (prefix_, rwf_version(), request_token, service_id, item_name, tp);
-	if (!vta.Calculate ("MSFT.O")) {
+#endif
+	vta::bar_t vta (prefix_, rwf_version(), request_token, service_id, item_name);
+	if (!vta.Calculate (underlying_symbol_.c_str())) {
 		return SendClose (request_token, service_id, model_type, item_name.c_str(), item_name.size(), use_attribinfo_in_updates,
-					RSSL_SC_ERROR, kErrorInternal);
+					RSSL_STREAM_CLOSED_RECOVER, RSSL_SC_ERROR, kErrorInternal);
 	}
 #if 0
 	const auto it = tokens_.find (request_token);
@@ -837,12 +835,12 @@ hitsuji::client_t::OnItemRequest (
 /* 2.8.1. Snapshot and Streaming Requests
  * A provider may also set the streamState to RSSL_STREAM_NON_STREAMING if it does not allow streaming of the 
  * requested item.  */
-		bool rc = SendRefresh (request_token, service_id, item_name.c_str(), item_name.size(), RSSL_STREAM_NON_STREAMING);
+		bool rc = SendRefresh (request_token, service_id, item_name);
 		tokens_.erase (token_ret.first);
 		return rc;
 	} else {
 		cumulative_stats_[CLIENT_PC_ITEM_REISSUE_REQUEST_RECEIVED]++;
-		return SendRefresh (request_token, service_id, item_name.c_str(), item_name.size(), RSSL_STREAM_NON_STREAMING);
+		return SendRefresh (request_token, service_id, item_name);
 	}
 #else
 	RsslBuffer* buf;
@@ -1134,6 +1132,7 @@ hitsuji::client_t::SendClose (
 	const char* name,
 	size_t name_len,
 	bool use_attribinfo_in_updates,
+	uint8_t stream_state,
 	uint8_t status_code,
 	const std::string& status_text
 	)
@@ -1188,7 +1187,7 @@ hitsuji::client_t::SendClose (
 	}
 	
 /* Item interaction state. */
-	response.state.streamState = RSSL_STREAM_CLOSED;
+	response.state.streamState = stream_state;
 /* Data quality state. */
 	response.state.dataState = RSSL_DATA_SUSPECT;
 /* 11.2.6.1 Structure Members
@@ -1197,6 +1196,7 @@ hitsuji::client_t::SendClose (
 	response.state.code = status_code;
 	response.state.text.data = const_cast<char*> (status_text.c_str()); /* 1-11361563014: text encoding undefined */
 	response.state.text.length = static_cast<uint32_t> (status_text.size()); /* Maximum 32,767 bytes */
+	response.flags |= RSSL_STMF_HAS_STATE;
 
 	buf = rsslGetBuffer (handle_, MAX_MSG_SIZE, RSSL_FALSE /* not packed */, &rssl_err);
 	if (nullptr == buf) {

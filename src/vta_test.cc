@@ -28,10 +28,9 @@ vta::test_t::test_t (
 	uint16_t rwf_version,
 	int32_t token, 
 	uint16_t service_id,
-	const std::string& name,
-	const boost::posix_time::time_period& tp
+	const std::string& item_name
 	)
-	: super (prefix, rwf_version, token, service_id, name, tp)
+	: super (prefix, rwf_version, token, service_id, item_name)
 {
 }
 
@@ -89,7 +88,7 @@ vta::test_t::WriteRaw (
 	RsslBuffer buf = { static_cast<uint32_t> (*length), data };
 	RsslRet rc;
 
-	DCHECK(!name().empty());
+	DCHECK(!item_name().empty());
 
 /* 7.4.8.3 Set the message model type of the response. */
 	response.msgBase.domainType = RSSL_DMT_MARKET_PRICE;
@@ -105,8 +104,8 @@ vta::test_t::WriteRaw (
 /* 7.4.8.2 Create or re-use a request attribute object (4.2.4) */
 	response.msgBase.msgKey.serviceId   = service_id();
 	response.msgBase.msgKey.nameType    = RDM_INSTRUMENT_NAME_TYPE_RIC;
-	response.msgBase.msgKey.name.data   = const_cast<char*> (name().c_str());
-	response.msgBase.msgKey.name.length = static_cast<uint32_t> (name().size());
+	response.msgBase.msgKey.name.data   = const_cast<char*> (item_name().c_str());
+	response.msgBase.msgKey.name.length = static_cast<uint32_t> (item_name().size());
 	response.msgBase.msgKey.flags = RSSL_MKF_HAS_SERVICE_ID | RSSL_MKF_HAS_NAME_TYPE | RSSL_MKF_HAS_NAME;
 	response.flags |= RSSL_RFMF_HAS_MSG_KEY;
 /* Set the request token. */

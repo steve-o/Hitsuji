@@ -10,6 +10,8 @@
 #include <boost/accumulators/statistics/max.hpp>
 #include <boost/accumulators/statistics/min.hpp>
 #include <boost/accumulators/statistics/sum.hpp>
+/* Boost Posix Time */
+#include <boost/date_time/posix_time/posix_time.hpp>
 
 #include "vta.hh"
 #include "accumulators/first.hh"
@@ -28,7 +30,7 @@ namespace vta
 	{
 		typedef intraday_t super;
 	public:
-		bar_t (const std::string& prefix, uint16_t rwf_version, int32_t token, uint16_t service_id, const std::string& name, const boost::posix_time::time_period& tp);
+		bar_t (const std::string& prefix, uint16_t rwf_version, int32_t token, uint16_t service_id, const std::string& item_name);
 		~bar_t();
 
 		virtual bool Calculate (const char* symbol_name) override;
@@ -45,7 +47,10 @@ namespace vta
 		double close_price() const { return boost::accumulators::last (last_price_); }
 		uint64_t number_trades() const { return boost::accumulators::count (last_price_); }
 		uint64_t accumulated_volume() const { return boost::accumulators::sum (tick_volume_); }
+		const boost::posix_time::ptime& open_time() const { return open_time_; }
+		const boost::posix_time::ptime& close_time() const { return close_time_; }
 
+		boost::posix_time::ptime open_time_, close_time_;
 		boost::accumulators::accumulator_set<double,
 			boost::accumulators::features<boost::accumulators::tag::first,
 						      boost::accumulators::tag::last,

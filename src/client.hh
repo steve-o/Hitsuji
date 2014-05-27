@@ -19,6 +19,7 @@
 #include <upa/upa.h>
 
 #include "chromium/debug/leak_tracker.hh"
+#include "googleurl/url_parse.h"
 #include "upa.hh"
 #include "config.hh"
 #include "deleter.hh"
@@ -125,7 +126,7 @@ namespace hitsuji
 		bool AcceptLogin (const RsslRequestMsg* msg, int32_t login_token);
 
 		bool SendDirectoryResponse (int32_t token, const char* service_name, uint32_t filter_mask);
-		bool SendClose (int32_t token, uint16_t service_id, uint8_t model_type, const char* name, size_t name_len, bool use_attribinfo_in_updates, uint8_t status_code, const std::string& status_text);
+		bool SendClose (int32_t token, uint16_t service_id, uint8_t model_type, const char* name, size_t name_len, bool use_attribinfo_in_updates, uint8_t stream_state, uint8_t status_code, const std::string& status_text);
 		int Submit (RsslBuffer* buf);
 
 		const boost::posix_time::ptime& NextPing() const {
@@ -168,6 +169,8 @@ namespace hitsuji
 		std::unordered_map<int32_t, std::shared_ptr<request_t>> tokens_;
 
 /* Pre-allocated parsing state for requested items. */
+		url_parse::Parsed parsed_;
+		url_parse::Component file_name_;
 		std::string url_, value_;
 		std::string underlying_symbol_;
 		std::istringstream iss_;

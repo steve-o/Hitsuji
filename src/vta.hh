@@ -37,7 +37,8 @@ namespace vta
 		virtual bool Calculate (const TBSymbolHandle& handle, FlexRecWorkAreaElement* work_area, FlexRecViewElement* view_element) = 0;
 		virtual bool WriteRaw (char* data, size_t* length) = 0;
 		virtual void Reset() = 0;
-		void SetTimePeriod (const boost::posix_time::time_period tp) { tp_ = tp; }
+		void set_time_period (const boost::posix_time::time_period& tp) { tp_ = tp; }
+		const boost::posix_time::time_period& time_period() const { return tp_; }
 		operator bool() const { return !is_null_; }
 
 	protected:
@@ -46,16 +47,19 @@ namespace vta
 		int32_t token() const { return token_; }
 		uint16_t service_id() const { return service_id_; }
 		const std::string& name() const { return name_; }
+		void set() { is_null_ = false; }
+		void clear() { is_null_ = true; }
 
+/* logging unique identifier prefix */
 		const std::string& prefix_;
-		boost::posix_time::time_period tp_;
-		bool is_null_;
 
 	private:
 		const uint16_t rwf_version_;
 		const int32_t token_;
 		const uint16_t service_id_;
 		const std::string& name_;
+		boost::posix_time::time_period tp_;
+		bool is_null_;
 	};
 
 } /* namespace vta */

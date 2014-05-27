@@ -8,17 +8,17 @@
 
 namespace internal {
 
-	struct release_deleter {
-		template <class T> void operator()(T* ptr) {
-			ptr->release();
-		};
+struct release_deleter {
+	template <class T> void operator()(T* ptr) {
+		ptr->release();
 	};
+};
 
-	struct destroy_deleter {
-		template <class T> void operator()(T* ptr) {
-			ptr->destroy();
-		};
+struct destroy_deleter {
+	template <class T> void operator()(T* ptr) {
+		ptr->destroy();
 	};
+};
 
 } /* namespace internal */
 

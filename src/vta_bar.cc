@@ -1,29 +1,51 @@
-/* A simple test implementation.
+/* OHLCV implementation.
  */
 
-#include "vta_test.hh"
+#include "vta_bar.hh"
+
+/* Velocity Analytics Plugin Framework */
+#include <FlexRecReader.h>
 
 #include "chromium/logging.hh"
 #include "upaostream.hh"
+#include "unix_epoch.hh"
 #include "rounding.hh"
 
 /* RDM FIDs. */
-static const int kRdmProductPermissionId	= 1;
-static const int kRdmPreferredDisplayTemplateId	= 1080;
+static const int kRdmTimeOfUpdateId		= 5;
+static const int kRdmTodaysHighId		= 12;
+static const int kRdmTodaysLowId		= 13;
+static const int kRdmActiveDateId		= 17;
+static const int kRdmOpeningPriceId 		= 19;
+static const int kRdmHistoricCloseId		= 21;
+static const int kRdmAccumulatedVolumeId	= 32;
+static const int kRdmNumberTradesId		= 77;
 
-static const int kRdmBackroundReferenceId	= 967;
-static const int kRdmGeneralText1Id		= 1000;
-static const int kRdmGeneralText2Id		= 1001;
-static const int kRdmPrimaryActivity1Id		= 393;
-static const int kRdmSecondActivity1Id		= 275;
-static const int kRdmContributor1Id		= 831;
-static const int kRdmContributorLocation1Id	= 836;
-static const int kRdmContributorPage1Id		= 841;
-static const int kRdmDealingCode1Id		= 826;
-static const int kRdmActivityTime1Id		= 1010;
-static const int kRdmActivityDate1Id		= 875;
+/* Flex Record Trade identifier. */
+static const uint32_t kTradeId			= 40001;
+/* Flex Record name for trades */
+static const char* kTradeRecord			= "Trade";
 
-vta::test_t::test_t (
+/* Offsets for Flex Record fields */
+static const int kFRLastPrice			= kFRFixedFields + 0;
+static const int kFRTickVolume			= kFRFixedFields + 19;
+
+/* Field names */
+static const char* kLastPriceField		= "LastPrice";
+static const char* kTickVolumeField		= "TickVolume";
+
+/* Nul values for fast copying */
+static const boost::accumulators::accumulator_set<double,
+	boost::accumulators::features<boost::accumulators::tag::first,
+					boost::accumulators::tag::last,
+					boost::accumulators::tag::max,
+					boost::accumulators::tag::min,
+					boost::accumulators::tag::count>> kNullLastPrice;
+static const boost::accumulators::accumulator_set<uint64_t,
+	boost::accumulators::features<boost::accumulators::tag::sum>> kNullTickVolume;
+
+
+vta::bar_t::bar_t (
 	const std::string& prefix,
 	uint16_t rwf_version,
 	int32_t token, 
@@ -35,7 +57,7 @@ vta::test_t::test_t (
 {
 }
 
-vta::test_t::~test_t()
+vta::bar_t::~bar_t()
 {
 }
 
@@ -48,10 +70,50 @@ vta::test_t::~test_t()
  * Returns false on error, true on success.
  */
 bool
-vta::test_t::Calculate (
+vta::bar_t::Calculate (
 	const char* symbol_name
 	)
 {
+/* Symbol names */
+	std::set<std::string> symbol_set;
+	symbol_set.insert (symbol_name);
+/* FlexRecord fields */
+	double   last_price;
+	uint64_t tick_volume;
+	std::set<FlexRecBinding> binding_set;
+	FlexRecBinding binding (kTradeId);
+	binding.Bind (kLastPriceField, &last_price);
+	binding.Bind (kTickVolumeField, &tick_volume);
+	binding_set.insert (binding);
+/* Time period */
+	const __time32_t from = internal::to_unix_epoch (time_period().begin());
+	const __time32_t till = internal::to_unix_epoch (time_period().end());
+/* Open cursor */
+	FlexRecReader fr;
+	try {
+		char error_text[1024];
+LOG(INFO) << "FlexRecReader::Open (" << from << ", " << till << ")";
+		const int cursor_status = fr.Open (symbol_set, binding_set, from, till, 0 /* forward */, 0 /* no limit */, error_text);
+		if (1 != cursor_status) {
+			LOG(ERROR) << prefix_ << "FlexRecReader::Open failed { \"code\": " << cursor_status
+				<< ", \"text\": \"" << error_text << "\" }";
+			return false;
+		}
+	} catch (const std::exception& e) {
+/* typically out-of-memory exceptions due to insufficient virtual memory */
+		LOG(ERROR) << prefix_ << "FlexRecReader::Open raised exception " << e.what();
+		return false;
+	}
+/* iterate through all ticks */
+int x = 0;
+	while (fr.Next()) {
+++x;
+		last_price_ (last_price);
+		tick_volume_ (tick_volume);
+	}
+LOG(INFO) << x << " ticks";
+/* Cleanup */
+	fr.Close();
 /* State now represents valid data. */
 	set();
 	return true;
@@ -62,18 +124,39 @@ vta::test_t::Calculate (
  * Returns false on error, true on success.
  */
 bool
-vta::test_t::Calculate(
+vta::bar_t::Calculate(
 	const TBSymbolHandle& handle,
 	FlexRecWorkAreaElement* work_area,
 	FlexRecViewElement* view_element
 	)
 {
+/* Time period */
+	const __time32_t from = internal::to_unix_epoch (time_period().begin());
+	const __time32_t till = internal::to_unix_epoch (time_period().end());
+
+	DVLOG(4) << prefix_ << "from: " << from << " till: " << till;
+	try {
+		U64 numRecs = FlexRecPrimitives::GetFlexRecords (
+							handle, 
+							const_cast<char*> (kTradeRecord),
+							from, till, 0 /* forward */,
+							0 /* no limit */,
+							view_element->view,
+							work_area->data,
+							OnFlexRecord,
+							this /* closure */
+								);
+	} catch (const std::exception& e) {
+		LOG(ERROR) << prefix_ << "FlexRecPrimitives::GetFlexRecords raised exception " << e.what();
+		return false;
+	}
+/* State now represents valid data. */
 	set();
 	return true;
 }
 
 bool
-vta::test_t::WriteRaw (
+vta::bar_t::WriteRaw (
 	char* data,
 	size_t* length
 	)
@@ -154,12 +237,10 @@ vta::test_t::WriteRaw (
 /* Clear required for SingleWriteIterator state machine. */
 		RsslFieldList field_list;
 		RsslFieldEntry field;
-		RsslBuffer data_buffer;
 		RsslReal rssl_real;
 
 		rsslClearFieldList (&field_list);
-		rsslClearFieldEntry (&field);
-		rsslClearReal (&rssl_real);
+		rsslClearFieldEntry (&field);		
 
 		field_list.flags = RSSL_FLF_HAS_STANDARD_DATA;
 		rc = rsslEncodeFieldListInit (&it, &field_list, 0 /* summary data */, 0 /* payload */);
@@ -177,103 +258,17 @@ vta::test_t::WriteRaw (
  * The iterator API provides setters for common types excluding 32-bit floats, with fallback to 
  * a generic DataBuffer API for other types or support of pre-calculated values.
  */
-/* PROD_PERM */
-		field.fieldId  = kRdmProductPermissionId;
-		field.dataType = RSSL_DT_UINT;
-		const uint64_t prod_perm = 213;		/* for JPY= */
-		rc = rsslEncodeFieldEntry (&it, &field, &prod_perm);
-		if (RSSL_RET_SUCCESS != rc) {
-			LOG(ERROR) << prefix_ << "rsslEncodeFieldEntry: { "
-				  "\"returnCode\": " << static_cast<signed> (rc) << ""
-				", \"enumeration\": \"" << rsslRetCodeToString (rc) << "\""
-				", \"text\": \"" << rsslRetCodeInfo (rc) << "\""
-				", \"fieldId\": " << field.fieldId << ""
-				", \"dataType\": \"" << rsslDataTypeToString (field.dataType) << "\""
-				", \"PROD_PERM\": " << prod_perm << ""
-				" }";
-			return false;
-		}
-
-/* PREF_DISP */
-		field.fieldId  = kRdmPreferredDisplayTemplateId;
-		field.dataType = RSSL_DT_UINT;
-		const uint64_t pref_disp = 6205;	/* for JPY= */
-		rc = rsslEncodeFieldEntry (&it, &field, &pref_disp);
-		if (RSSL_RET_SUCCESS != rc) {
-			LOG(ERROR) << prefix_ << "rsslEncodeFieldEntry: { "
-				  "\"returnCode\": " << static_cast<signed> (rc) << ""
-				", \"enumeration\": \"" << rsslRetCodeToString (rc) << "\""
-				", \"text\": \"" << rsslRetCodeInfo (rc) << "\""
-				", \"fieldId\": " << field.fieldId << ""
-				", \"dataType\": \"" << rsslDataTypeToString (field.dataType) << "\""
-				", \"PREF_DISP\": " << pref_disp << ""
-				" }";
-			return false;
-		}
-
-/* BKGD_REF */
-		field.fieldId  = kRdmBackroundReferenceId;
-		field.dataType = RSSL_DT_ASCII_STRING;
-		const std::string bkgd_ref ("Japanese Yen");
-		data_buffer.data   = const_cast<char*> (bkgd_ref.c_str());
-		data_buffer.length = static_cast<uint32_t> (bkgd_ref.size());
-		rc = rsslEncodeFieldEntry (&it, &field, &data_buffer);
-		if (RSSL_RET_SUCCESS != rc) {
-			LOG(ERROR) << prefix_ << "rsslEncodeFieldEntry: { "
-				  "\"returnCode\": " << static_cast<signed> (rc) << ""
-				", \"enumeration\": \"" << rsslRetCodeToString (rc) << "\""
-				", \"text\": \"" << rsslRetCodeInfo (rc) << "\""
-				", \"fieldId\": " << field.fieldId << ""
-				", \"dataType\": \"" << rsslDataTypeToString (field.dataType) << "\""
-				", \"BKGD_REF\": \"" << bkgd_ref << "\""
-				" }";
-			return false;
-		}
-
-/* GV1_TEXT */
-		field.fieldId  = kRdmGeneralText1Id;
-		field.dataType = RSSL_DT_RMTES_STRING;
-		const std::string gv1_text ("SPOT");
-		data_buffer.data   = const_cast<char*> (gv1_text.c_str());
-		data_buffer.length = static_cast<uint32_t> (gv1_text.size());
-		rc = rsslEncodeFieldEntry (&it, &field, &data_buffer);
-		if (RSSL_RET_SUCCESS != rc) {
-			LOG(ERROR) << prefix_ << "rsslEncodeFieldEntry: { "
-				  "\"returnCode\": " << static_cast<signed> (rc) << ""
-				", \"enumeration\": \"" << rsslRetCodeToString (rc) << "\""
-				", \"text\": \"" << rsslRetCodeInfo (rc) << "\""
-				", \"fieldId\": " << field.fieldId << ""
-				", \"dataType\": \"" << rsslDataTypeToString (field.dataType) << "\""
-				", \"GV1_TEXT\": \"" << gv1_text << "\""
-				" }";
-			return false;
-		}
-
-/* GV2_TEXT */
-		field.fieldId  = kRdmGeneralText2Id;
-		field.dataType = RSSL_DT_RMTES_STRING;
-		const std::string gv2_text ("USDJPY");
-		data_buffer.data   = const_cast<char*> (gv2_text.c_str());
-		data_buffer.length = static_cast<uint32_t> (gv2_text.size());
-		rc = rsslEncodeFieldEntry (&it, &field, &data_buffer);
-		if (RSSL_RET_SUCCESS != rc) {
-			LOG(ERROR) << prefix_ << "rsslEncodeFieldEntry: { "
-				  "\"returnCode\": " << static_cast<signed> (rc) << ""
-				", \"enumeration\": \"" << rsslRetCodeToString (rc) << "\""
-				", \"text\": \"" << rsslRetCodeInfo (rc) << "\""
-				", \"fieldId\": " << field.fieldId << ""
-				", \"dataType\": \"" << rsslDataTypeToString (field.dataType) << "\""
-				", \"GV2_TEXT\": \"" << gv2_text << "\""
-				" }";
-			return false;
-		}
-
-/* PRIMACT_1 */
-		field.fieldId  = kRdmPrimaryActivity1Id;
+/* HIGH_1 */
+		field.fieldId  = kRdmTodaysHighId;
 		field.dataType = RSSL_DT_REAL;
-		const double bid = 82.20;
-		rssl_real.value = rounding::mantissa (bid);
-		rssl_real.hint  = rounding::hint();
+		if (0 == number_trades()) {
+			rsslBlankReal (&rssl_real);
+		} else {
+			const double high_price = this->high_price();
+			rsslClearReal (&rssl_real);
+			rssl_real.value = rounding::mantissa (high_price);
+			rssl_real.hint  = rounding::hint();
+		}
 		rc = rsslEncodeFieldEntry (&it, &field, &rssl_real);
 		if (RSSL_RET_SUCCESS != rc) {
 			LOG(ERROR) << prefix_ << "rsslEncodeFieldEntry: { "
@@ -282,7 +277,7 @@ vta::test_t::WriteRaw (
 				", \"text\": \"" << rsslRetCodeInfo (rc) << "\""
 				", \"fieldId\": " << field.fieldId << ""
 				", \"dataType\": \"" << rsslDataTypeToString (field.dataType) << "\""
-				", \"PRIMACT_1\": { "
+				", \"HIGH_1\": { "
 					  "\"isBlank\": " << (rssl_real.isBlank ? "true" : "false") << ""
 					", \"value\": " << rssl_real.value << ""
 					", \"hint\": \"" << internal::real_hint_string (static_cast<RsslRealHints> (rssl_real.hint)) << "\""
@@ -290,13 +285,17 @@ vta::test_t::WriteRaw (
 				" }";
 			return false;
 		}
-
-/* SEC_ACT_1 */
-		field.fieldId  = kRdmSecondActivity1Id;
+/* LOW_1 */
+		field.fieldId  = kRdmTodaysLowId;
 		field.dataType = RSSL_DT_REAL;
-		const double ask = 82.22;
-		rssl_real.value = rounding::mantissa (ask);
-		rssl_real.hint  = rounding::hint();
+		if (0 == number_trades()) {
+			rsslBlankReal (&rssl_real);
+		} else {
+        		const double low_price = this->low_price();
+			rsslClearReal (&rssl_real);
+			rssl_real.value = rounding::mantissa (low_price);
+			rssl_real.hint  = rounding::hint();
+		}
 		rc = rsslEncodeFieldEntry (&it, &field, &rssl_real);
 		if (RSSL_RET_SUCCESS != rc) {
 			LOG(ERROR) << prefix_ << "rsslEncodeFieldEntry: { "
@@ -305,7 +304,7 @@ vta::test_t::WriteRaw (
 				", \"text\": \"" << rsslRetCodeInfo (rc) << "\""
 				", \"fieldId\": " << field.fieldId << ""
 				", \"dataType\": \"" << rsslDataTypeToString (field.dataType) << "\""
-				", \"SEC_ACT_1\": { "
+				", \"LOW_1\": { "
 					  "\"isBlank\": " << (rssl_real.isBlank ? "true" : "false") << ""
 					", \"value\": " << rssl_real.value << ""
 					", \"hint\": \"" << internal::real_hint_string (static_cast<RsslRealHints> (rssl_real.hint)) << "\""
@@ -313,14 +312,18 @@ vta::test_t::WriteRaw (
 				" }";
 			return false;
 		}
-
-/* CTBTR_1 */
-		field.fieldId  = kRdmContributor1Id;
-		field.dataType = RSSL_DT_RMTES_STRING;
-		const std::string ctbtr_1 ("RBS");
-		data_buffer.data   = const_cast<char*> (ctbtr_1.c_str());
-		data_buffer.length = static_cast<uint32_t> (ctbtr_1.size());
-		rc = rsslEncodeFieldEntry (&it, &field, &data_buffer);
+/* OPEN_PRC */
+		field.fieldId  = kRdmOpeningPriceId;
+		field.dataType = RSSL_DT_REAL;
+		if (0 == number_trades()) {
+			rsslBlankReal (&rssl_real);
+		} else {
+			const double open_price = this->open_price();
+			rsslClearReal (&rssl_real);
+			rssl_real.value = rounding::mantissa (open_price);
+			rssl_real.hint  = rounding::hint();
+		}
+		rc = rsslEncodeFieldEntry (&it, &field, &rssl_real);
 		if (RSSL_RET_SUCCESS != rc) {
 			LOG(ERROR) << prefix_ << "rsslEncodeFieldEntry: { "
 				  "\"returnCode\": " << static_cast<signed> (rc) << ""
@@ -328,18 +331,26 @@ vta::test_t::WriteRaw (
 				", \"text\": \"" << rsslRetCodeInfo (rc) << "\""
 				", \"fieldId\": " << field.fieldId << ""
 				", \"dataType\": \"" << rsslDataTypeToString (field.dataType) << "\""
-				", \"CTBTR_1\": \"" << ctbtr_1 << "\""
+				", \"OPEN_PRC\": { "
+					  "\"isBlank\": " << (rssl_real.isBlank ? "true" : "false") << ""
+					", \"value\": " << rssl_real.value << ""
+					", \"hint\": \"" << internal::real_hint_string (static_cast<RsslRealHints> (rssl_real.hint)) << "\""
+				" }"
 				" }";
 			return false;
 		}
-
-/* CTB_LOC1 */
-		field.fieldId  = kRdmContributorLocation1Id;
-		field.dataType = RSSL_DT_RMTES_STRING;
-		const std::string ctb_loc1 ("XST");
-		data_buffer.data   = const_cast<char*> (ctb_loc1.c_str());
-		data_buffer.length = static_cast<uint32_t> (ctb_loc1.size());
-		rc = rsslEncodeFieldEntry (&it, &field, &data_buffer);
+/* HST_CLOSE */
+		field.fieldId  = kRdmHistoricCloseId;
+		field.dataType = RSSL_DT_REAL;
+		if (0 == number_trades()) {
+			rsslBlankReal (&rssl_real);
+		} else {
+			const double close_price = this->close_price();
+			rsslClearReal (&rssl_real);
+			rssl_real.value = rounding::mantissa (close_price);
+			rssl_real.hint  = rounding::hint();
+		}
+		rc = rsslEncodeFieldEntry (&it, &field, &rssl_real);
 		if (RSSL_RET_SUCCESS != rc) {
 			LOG(ERROR) << prefix_ << "rsslEncodeFieldEntry: { "
 				  "\"returnCode\": " << static_cast<signed> (rc) << ""
@@ -347,18 +358,28 @@ vta::test_t::WriteRaw (
 				", \"text\": \"" << rsslRetCodeInfo (rc) << "\""
 				", \"fieldId\": " << field.fieldId << ""
 				", \"dataType\": \"" << rsslDataTypeToString (field.dataType) << "\""
-				", \"CTB_LOC1\": \"" << ctb_loc1 << "\""
+				", \"HST_CLOSE\": { "
+					  "\"isBlank\": " << (rssl_real.isBlank ? "true" : "false") << ""
+					", \"value\": " << rssl_real.value << ""
+					", \"hint\": \"" << internal::real_hint_string (static_cast<RsslRealHints> (rssl_real.hint)) << "\""
+				" }"
 				" }";
 			return false;
 		}
-
-/* CTB_PAGE1 */
-		field.fieldId  = kRdmContributorPage1Id;
-		field.dataType = RSSL_DT_RMTES_STRING;
-		const std::string ctb_page1 ("1RBS");
-		data_buffer.data   = const_cast<char*> (ctb_page1.c_str()); 
-		data_buffer.length = static_cast<uint32_t> (ctb_page1.size());
-		rc = rsslEncodeFieldEntry (&it, &field, &data_buffer);
+/* ACVOL_1 */
+		field.fieldId  = kRdmAccumulatedVolumeId;
+		field.dataType = RSSL_DT_REAL;
+		const uint64_t accumulated_volume = this->accumulated_volume();
+/* WARNING: overflow at source not managed. */
+		if (accumulated_volume <= 0xFFFFFFFFFFFFFF) {	    /* max(RWF_LEN) == 7 bytes */
+			rsslClearReal (&rssl_real);
+			rssl_real.value = accumulated_volume;
+			rssl_real.hint  = RSSL_RH_EXPONENT0;
+		} else {    /* > 72,057,594,037,927,935 (17+ digits) */
+			const RsslDouble rssl_double = static_cast<RsslDouble> (accumulated_volume); /* 15 significant figures */
+			rsslDoubleToReal (&rssl_real, const_cast<RsslDouble*> (&rssl_double), RSSL_RH_EXPONENT7);
+		}   /* 24+ digits (78bits+) will still cause overflow and RSSL_DT_DOUBLE must be used. */
+		rc = rsslEncodeFieldEntry (&it, &field, &rssl_real);
 		if (RSSL_RET_SUCCESS != rc) {
 			LOG(ERROR) << prefix_ << "rsslEncodeFieldEntry: { "
 				  "\"returnCode\": " << static_cast<signed> (rc) << ""
@@ -366,18 +387,23 @@ vta::test_t::WriteRaw (
 				", \"text\": \"" << rsslRetCodeInfo (rc) << "\""
 				", \"fieldId\": " << field.fieldId << ""
 				", \"dataType\": \"" << rsslDataTypeToString (field.dataType) << "\""
-				", \"CTB_PAGE1\": \"" << ctb_page1 << "\""
+				", \"ACVOL_1\": { "
+					  "\"isBlank\": " << (rssl_real.isBlank ? "true" : "false") << ""
+					", \"value\": " << rssl_real.value << ""
+					", \"hint\": \"" << internal::real_hint_string (static_cast<RsslRealHints> (rssl_real.hint)) << "\""
+				" }"
 				" }";
 			return false;
 		}
-
-/* DLG_CODE1 */
-		field.fieldId  = kRdmDealingCode1Id;
-		field.dataType = RSSL_DT_RMTES_STRING;
-		const std::string dlg_code1 ("RBSN");
-		data_buffer.data   = const_cast<char*> (dlg_code1.c_str());
-		data_buffer.length = static_cast<uint32_t> (dlg_code1.size());
-		rc = rsslEncodeFieldEntry (&it, &field, &data_buffer);
+/* NUM_MOVES */
+		field.fieldId  = kRdmNumberTradesId;
+		field.dataType = RSSL_DT_REAL;
+		const uint64_t number_trades = this->number_trades();
+/* WARNING: overflow not managed. */
+		rsslClearReal (&rssl_real);
+		rssl_real.value = number_trades;
+		rssl_real.hint  = RSSL_RH_EXPONENT0;
+		rc = rsslEncodeFieldEntry (&it, &field, &rssl_real);
 		if (RSSL_RET_SUCCESS != rc) {
 			LOG(ERROR) << prefix_ << "rsslEncodeFieldEntry: { "
 				  "\"returnCode\": " << static_cast<signed> (rc) << ""
@@ -385,7 +411,11 @@ vta::test_t::WriteRaw (
 				", \"text\": \"" << rsslRetCodeInfo (rc) << "\""
 				", \"fieldId\": " << field.fieldId << ""
 				", \"dataType\": \"" << rsslDataTypeToString (field.dataType) << "\""
-				", \"DLG_CODE1\": \"" << dlg_code1 << "\""
+				", \"NUM_MOVES\": { "
+					  "\"isBlank\": " << (rssl_real.isBlank ? "true" : "false") << ""
+					", \"value\": " << rssl_real.value << ""
+					", \"hint\": \"" << internal::real_hint_string (static_cast<RsslRealHints> (rssl_real.hint)) << "\""
+				" }"
 				" }";
 			return false;
 		}
@@ -426,9 +456,36 @@ vta::test_t::WriteRaw (
 }
 
 void
-vta::test_t::Reset()
+vta::bar_t::Reset()
 {
+	last_price_ = kNullLastPrice;
+	tick_volume_ = kNullTickVolume;
 	clear();
 }
+
+/* Apply a FlexRecord to a partial bar result.
+ *
+ * Returns <1> to continue processing, <2> to halt processing due to an error.
+ */
+int
+vta::bar_t::OnFlexRecord(
+	FRTreeCallbackInfo* info
+	)
+{
+	CHECK(nullptr != info->callersData);
+	auto& bar = *reinterpret_cast<bar_t*> (info->callersData);
+
+/* extract from view */
+	const double   last_price  = *reinterpret_cast<double*>   (info->theView[kFRLastPrice].data);
+	const uint64_t tick_volume = *reinterpret_cast<uint64_t*> (info->theView[kFRTickVolume].data);
+
+/* add to accumulators */
+	bar.last_price_  (last_price);
+	bar.tick_volume_ (tick_volume);
+
+/* continue processing */
+	return 1;
+}
+
 
 /* eof */

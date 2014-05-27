@@ -14,6 +14,7 @@
 #include "upaostream.hh"
 #include "provider.hh"
 
+#include "vta_bar.hh"
 #include "vta_test.hh"
 
 /* Maximum encoded size of an RSSL provider to client message. */
@@ -28,23 +29,8 @@ static const std::string kErrorLoginRequired = "Login required for request.";
 static const std::string kErrorDuplicateStream = "Item was reopened under new stream.";
 static const std::string kErrorCrossStreams = "Non-streaming reissue on streaming request.";
 static const std::string kErrorMalformedRequest = "Malformed request.";
+static const std::string kErrorNotFound = "Not found in SearchEngine.";
 static const std::string kErrorInternal = "Internal error.";
-
-/* http://en.wikipedia.org/wiki/Unix_epoch */
-static const boost::gregorian::date kUnixEpoch (1970, 1, 1);
-
-
-/* Convert Posix time to Unix Epoch time.
- */
-template< typename TimeT >
-inline
-TimeT
-to_unix_epoch (
-	const boost::posix_time::ptime t
-	)
-{
-	return (t - boost::posix_time::ptime (kUnixEpoch)).total_seconds();
-}
 
 hitsuji::client_t::client_t (
 	std::shared_ptr<hitsuji::provider_t> provider,
@@ -797,12 +783,13 @@ hitsuji::client_t::OnItemRequest (
 					RSSL_SC_USAGE_ERROR, kErrorLoginRequired);
 	}
 
+/* Filtered before entry. */
 	CHECK(RSSL_DMT_MARKET_PRICE == model_type);
 
 /* decompose request */
 	url_parse::Parsed parsed;
 	url_parse::Component file_name;
-	url_.assign ("vta://localhost");
+	url_.assign ("vta://localhost/");
 	url_.append (item_name);
 	url_parse::ParseStandardURL (url_.c_str(), static_cast<int>(url_.size()), &parsed);
 	if (parsed.path.is_valid())
@@ -812,7 +799,7 @@ hitsuji::client_t::OnItemRequest (
 		cumulative_stats_[CLIENT_PC_ITEM_REQUEST_MALFORMED]++;
 		LOG(INFO) << prefix_ << "Closing invalid request for \"" << item_name << "\"";
 		return SendClose (request_token, service_id, model_type, item_name.c_str(), item_name.size(), use_attribinfo_in_updates,
-					RSSL_SC_NOT_ENTITLED, kErrorMalformedRequest);
+					RSSL_SC_NOT_FOUND, kErrorMalformedRequest);
 	}
 /* require a NULL terminated string */
 	underlying_symbol_.assign (url_.c_str() + file_name.begin, file_name.len);
@@ -824,12 +811,20 @@ hitsuji::client_t::OnItemRequest (
 	} else {
 		cumulative_stats_[CLIENT_PC_ITEM_SNAPSHOT_REQUEST_RECEIVED]++;
 	}
+/* Check SearchEngine.exe inventory */
+	if (0 == TBPrimitives::IsSymbolExists (underlying_symbol_.c_str())) {
+		cumulative_stats_[CLIENT_PC_ITEM_NOT_FOUND]++;
+		cumulative_stats_[CLIENT_PC_ITEM_REQUEST_REJECTED]++;
+		LOG(INFO) << prefix_ << "Closing request for unknown item \"" << underlying_symbol_ << "\".";
+		return SendClose (request_token, service_id, model_type, item_name.c_str(), item_name.size(), use_attribinfo_in_updates,
+					RSSL_SC_NOT_FOUND, kErrorNotFound);
+	}
 	using namespace boost::gregorian;
     	using namespace boost::posix_time;
-	date d (day_clock::universal_day());
-	ptime t1 (d, hours (9)), t2 (d, hours (10));
-	time_period tp (t1, t2);
-	vta::test_t vta (prefix_, rwf_version(), request_token, service_id, item_name, tp);
+	const date d (day_clock::universal_day());
+	const ptime t1 (d, hours (14)), t2 (d, hours (15));
+	const time_period tp (t1, t2);
+	vta::bar_t vta (prefix_, rwf_version(), request_token, service_id, item_name, tp);
 	if (!vta.Calculate ("MSFT.O")) {
 		return SendClose (request_token, service_id, model_type, item_name.c_str(), item_name.size(), use_attribinfo_in_updates,
 					RSSL_SC_ERROR, kErrorInternal);

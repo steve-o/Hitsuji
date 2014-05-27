@@ -7,8 +7,17 @@
 #include <cmath>
 #include <cstdint>
 
+#include <rtr/rsslReal.h>
+
 namespace rounding
 {
+
+static inline
+uint8_t
+hint()
+{
+	return RSSL_RH_EXPONENT_4;
+}
 
 static inline
 double

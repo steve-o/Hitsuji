@@ -13,34 +13,22 @@
 #include "googleurl/url_parse.h"
 #include "upaostream.hh"
 #include "provider.hh"
-#include "rounding.hh"
+
+#include "vta_test.hh"
 
 /* Maximum encoded size of an RSSL provider to client message. */
 #define MAX_MSG_SIZE 4096
 
-/* RDM FIDs. */
-static const int kRdmProductPermissionId	= 1;
-static const int kRdmPreferredDisplayTemplateId	= 1080;
-
-static const int kRdmBackroundReferenceId	= 967;
-static const int kRdmGeneralText1Id		= 1000;
-static const int kRdmGeneralText2Id		= 1001;
-static const int kRdmPrimaryActivity1Id		= 393;
-static const int kRdmSecondActivity1Id		= 275;
-static const int kRdmContributor1Id		= 831;
-static const int kRdmContributorLocation1Id	= 836;
-static const int kRdmContributorPage1Id		= 841;
-static const int kRdmDealingCode1Id		= 826;
-static const int kRdmActivityTime1Id		= 1010;
-static const int kRdmActivityDate1Id		= 875;
-
-static const std::string kErrorCloseOnClose = "Close request on closed session.";
+static const std::string kErrorNone = "";
 static const std::string kErrorUnsupportedMsgClass = "Unsupported message class.";
 static const std::string kErrorUnsupportedRequest = "Unsupported domain type in request.";
 static const std::string kErrorUnsupportedDictionary = "Unsupported dictionary request.";
 static const std::string kErrorUnsupportedNonStreaming = "Unsupported non-streaming request.";
 static const std::string kErrorLoginRequired = "Login required for request.";
+static const std::string kErrorDuplicateStream = "Item was reopened under new stream.";
+static const std::string kErrorCrossStreams = "Non-streaming reissue on streaming request.";
 static const std::string kErrorMalformedRequest = "Malformed request.";
+static const std::string kErrorInternal = "Internal error.";
 
 /* http://en.wikipedia.org/wiki/Unix_epoch */
 static const boost::gregorian::date kUnixEpoch (1970, 1, 1);
@@ -142,8 +130,8 @@ hitsuji::client_t::Initialize()
 		  "\"clientHostname\": " << client_hostname.str() << ""
 		", \"clientIP\": " << client_ip.str() << ""
 		", \"connectionType\": \"" << internal::connection_type_string (handle_->connectionType) << "\""
-		", \"majorVersion\": " << static_cast<unsigned> (GetRwfMajorVersion()) << ""
-		", \"minorVersion\": " << static_cast<unsigned> (GetRwfMinorVersion()) << ""
+		", \"majorVersion\": " << static_cast<unsigned> (rwf_major_version()) << ""
+		", \"minorVersion\": " << static_cast<unsigned> (rwf_minor_version()) << ""
 		", \"pingTimeout\": " << handle_->pingTimeout << ""
 		", \"protocolType\": " << handle_->protocolType << ""
 		", \"socketId\": " << handle_->socketId << ""
@@ -165,14 +153,20 @@ hitsuji::client_t::Close()
 {
 /* client_t exists when client session is active but not necessarily logged in. */
 	if (is_logged_in_) {
+/* reject new item requests. */
+		is_logged_in_ = false;
+/* drop active requests. */
+		VLOG(2) << prefix_ << "Removing " << tokens_.size() << " item streams.";
+		tokens_.clear();
+/* notify client session is no longer valid via login stream. */
 		return SendClose (login_token_,
-				  provider_->GetServiceId(),
-				  RSSL_DMT_LOGIN,
-				  nullptr,
-				  0,
-				  false, /* no AttribInfo in MMT_LOGIN */
-				  RSSL_SC_NONE,
-				  kErrorCloseOnClose.c_str(), kErrorCloseOnClose.size());
+				    provider_->service_id(),
+				    RSSL_DMT_LOGIN,
+				    nullptr,
+				    0,
+				    false, /* no AttribInfo in MMT_LOGIN */
+				    RSSL_SC_NONE,
+				    kErrorNone);
 	} else {
 		return true;
 	}
@@ -209,7 +203,7 @@ hitsuji::client_t::OnMsg (
 				  msg->msgBase.msgKey.name.length,
 				  true, /* always send AttribInfo */
 				  RSSL_SC_USAGE_ERROR,
-				  kErrorUnsupportedMsgClass.c_str(), kErrorUnsupportedMsgClass.size());
+				  kErrorUnsupportedMsgClass);
 	}
 }
 
@@ -247,7 +241,7 @@ hitsuji::client_t::OnRequestMsg (
 				  request_msg->msgBase.msgKey.name.length,
 				  RSSL_RQMF_MSG_KEY_IN_UPDATES == (request_msg->flags & RSSL_RQMF_MSG_KEY_IN_UPDATES),
 				  RSSL_SC_USAGE_ERROR,
-				  kErrorUnsupportedRequest.c_str(), kErrorUnsupportedRequest.size());
+				  kErrorUnsupportedRequest);
 	}
 }
 
@@ -400,14 +394,14 @@ hitsuji::client_t::RejectLogin (
 			" }";
 		goto cleanup;
 	}
-	rc = rsslSetEncodeIteratorRWFVersion (&it, GetRwfMajorVersion(), GetRwfMinorVersion());
+	rc = rsslSetEncodeIteratorRWFVersion (&it, rwf_major_version(), rwf_minor_version());
 	if (RSSL_RET_SUCCESS != rc) {
 		LOG(ERROR) << prefix_ << "rsslSetEncodeIteratorRWFVersion: { "
 			  "\"returnCode\": " << static_cast<signed> (rc) << ""
 			", \"enumeration\": \"" << rsslRetCodeToString (rc) << "\""
 			", \"text\": \"" << rsslRetCodeInfo (rc) << "\""
-			", \"majorVersion\": " << static_cast<unsigned> (GetRwfMajorVersion()) << ""
-			", \"minorVersion\": " << static_cast<unsigned> (GetRwfMinorVersion()) << ""
+			", \"majorVersion\": " << static_cast<unsigned> (rwf_major_version()) << ""
+			", \"minorVersion\": " << static_cast<unsigned> (rwf_minor_version()) << ""
 			" }";
 		goto cleanup;
 	}
@@ -535,14 +529,14 @@ hitsuji::client_t::AcceptLogin (
 			" }";
 		goto cleanup;
 	}
-	rc = rsslSetEncodeIteratorRWFVersion (&it, GetRwfMajorVersion(), GetRwfMinorVersion());
+	rc = rsslSetEncodeIteratorRWFVersion (&it, rwf_major_version(), rwf_minor_version());
 	if (RSSL_RET_SUCCESS != rc) {
 		LOG(ERROR) << prefix_ << "rsslSetEncodeIteratorRWFVersion: { "
 			  "\"returnCode\": " << static_cast<signed> (rc) << ""
 			", \"enumeration\": \"" << rsslRetCodeToString (rc) << "\""
 			", \"text\": \"" << rsslRetCodeInfo (rc) << "\""
-			", \"majorVersion\": " << static_cast<unsigned> (GetRwfMajorVersion()) << ""
-			", \"minorVersion\": " << static_cast<unsigned> (GetRwfMinorVersion()) << ""
+			", \"majorVersion\": " << static_cast<unsigned> (rwf_major_version()) << ""
+			", \"minorVersion\": " << static_cast<unsigned> (rwf_minor_version()) << ""
 			" }";
 		goto cleanup;
 	}
@@ -732,8 +726,8 @@ hitsuji::client_t::OnDirectoryRequest (
 	else if (has_service_id && 0 != request_msg->msgBase.msgKey.serviceId)
 	{
 		const uint16_t service_id = request_msg->msgBase.msgKey.serviceId;
-		if (service_id == provider_->GetServiceId()) {
-			return SendDirectoryResponse (request_token, provider_->GetServiceName(), filter_mask);
+		if (service_id == provider_->service_id()) {
+			return SendDirectoryResponse (request_token, provider_->service_name(), filter_mask);
 		} else {
 /* default to full directory if id does not match */
 			LOG(WARNING) << prefix_ << "Received MMT_DIRECTORY request for unknown service id #" << service_id << ", returning entire directory.";
@@ -764,7 +758,7 @@ hitsuji::client_t::OnDictionaryRequest (
 			  request_msg->msgBase.msgKey.name.length,
 			  RSSL_RQMF_MSG_KEY_IN_UPDATES == (request_msg->flags & RSSL_RQMF_MSG_KEY_IN_UPDATES),
 			  RSSL_SC_USAGE_ERROR,
-			  kErrorUnsupportedDictionary.c_str(), kErrorUnsupportedDictionary.size());
+			  kErrorUnsupportedDictionary);
 }
 
 bool
@@ -774,7 +768,7 @@ hitsuji::client_t::OnItemRequest (
 {
 	DCHECK (nullptr != request_msg);
 	cumulative_stats_[CLIENT_PC_ITEM_REQUEST_RECEIVED]++;
-	LOG(INFO) << prefix_ << "ItemRequest:" << request_msg;
+	LOG(INFO) << prefix_ << "ItemRequest:" << *request_msg;
 
 /* 10.3.6 Handling Item Requests
  * - Ensure that the requesting session is logged in.
@@ -788,8 +782,7 @@ hitsuji::client_t::OnItemRequest (
  */
 	const uint16_t service_id    = request_msg->msgBase.msgKey.serviceId;
 	const uint8_t  model_type    = request_msg->msgBase.domainType;
-	const char*    item_name     = request_msg->msgBase.msgKey.name.data;
-	const size_t   item_name_len = request_msg->msgBase.msgKey.name.length;
+	const std::string item_name (request_msg->msgBase.msgKey.name.data, request_msg->msgBase.msgKey.name.length);
 	const bool use_attribinfo_in_updates = (0 != (request_msg->flags & RSSL_RQMF_MSG_KEY_IN_UPDATES));
 
 /* 7.4.3.2 Request Tokens
@@ -800,123 +793,97 @@ hitsuji::client_t::OnItemRequest (
 		cumulative_stats_[CLIENT_PC_ITEM_REQUEST_REJECTED]++;
 		cumulative_stats_[CLIENT_PC_ITEM_REQUEST_BEFORE_LOGIN]++;
 		LOG(INFO) << prefix_ << "Closing request for client without accepted login.";
-		return SendClose (request_token, service_id, model_type, item_name, item_name_len, use_attribinfo_in_updates,
-					RSSL_SC_USAGE_ERROR, kErrorLoginRequired.c_str(), kErrorLoginRequired.size());
+		return SendClose (request_token, service_id, model_type, item_name.c_str(), item_name.size(), use_attribinfo_in_updates,
+					RSSL_SC_USAGE_ERROR, kErrorLoginRequired);
 	}
 
 	CHECK(RSSL_DMT_MARKET_PRICE == model_type);
-	const bool is_streaming_request = (RSSL_RQMF_STREAMING == (request_msg->flags & RSSL_RQMF_STREAMING));
-
-	if (is_streaming_request)
-	{
-		return OnItemStreamingRequest (request_msg, request_token);
-	}
-	else
-	{
-		return OnItemSnapshotRequest (request_msg, request_token);
-	}
-}
-
-/* If supported: CLIENT_PC_ITEM_DUPLICATE_SNAPSHOT
- */
-bool
-hitsuji::client_t::OnItemSnapshotRequest (
-	const RsslRequestMsg* request_msg,
-	int32_t request_token
-	)
-{
-	DCHECK (nullptr != request_msg);
-	cumulative_stats_[CLIENT_PC_ITEM_SNAPSHOT_REQUEST_RECEIVED]++;
-
-	const uint16_t service_id    = request_msg->msgBase.msgKey.serviceId;
-	const uint8_t  model_type    = request_msg->msgBase.domainType;
-	const char*    item_name     = request_msg->msgBase.msgKey.name.data;
-	const size_t   item_name_len = request_msg->msgBase.msgKey.name.length;
-	const bool use_attribinfo_in_updates = (0 != (request_msg->flags & RSSL_RQMF_MSG_KEY_IN_UPDATES));
-
-/* closest equivalent to not-supported is NotAuthorizedEnum. */
-	cumulative_stats_[CLIENT_PC_ITEM_REQUEST_REJECTED]++;
-	cumulative_stats_[CLIENT_PC_ITEM_REQUEST_MALFORMED]++;
-	LOG(INFO) << prefix_ << "Rejecting unsupported snapshot request.";
-	return SendClose (request_token, service_id, model_type, item_name, item_name_len, use_attribinfo_in_updates,
-				RSSL_SC_NOT_ENTITLED, kErrorUnsupportedNonStreaming.c_str(), kErrorUnsupportedNonStreaming.size());
-}
-
-bool
-hitsuji::client_t::OnItemStreamingRequest (
-	const RsslRequestMsg* request_msg,
-	int32_t request_token
-	)
-{
-	DCHECK (nullptr != request_msg);
-	cumulative_stats_[CLIENT_PC_ITEM_STREAMING_REQUEST_RECEIVED]++;
-
-	const uint16_t service_id    = request_msg->msgBase.msgKey.serviceId;
-	const uint8_t  model_type    = request_msg->msgBase.domainType;
-	const char*    item_name     = request_msg->msgBase.msgKey.name.data;
-	const size_t   item_name_len = request_msg->msgBase.msgKey.name.length;
-	const bool use_attribinfo_in_updates = (0 != (request_msg->flags & RSSL_RQMF_MSG_KEY_IN_UPDATES));
 
 /* decompose request */
-	DVLOG(4) << prefix_ << "item name: [" << std::string (item_name, item_name_len) << "] len: " << item_name_len;
 	url_parse::Parsed parsed;
 	url_parse::Component file_name;
 	url_.assign ("vta://localhost");
-	url_.append (item_name, item_name_len);
+	url_.append (item_name);
 	url_parse::ParseStandardURL (url_.c_str(), static_cast<int>(url_.size()), &parsed);
 	if (parsed.path.is_valid())
 		url_parse::ExtractFileName (url_.c_str(), parsed.path, &file_name);
 	if (!file_name.is_valid()) {
 		cumulative_stats_[CLIENT_PC_ITEM_REQUEST_REJECTED]++;
 		cumulative_stats_[CLIENT_PC_ITEM_REQUEST_MALFORMED]++;
-		LOG(INFO) << prefix_ << "Closing invalid request for \"" << std::string (item_name, item_name_len) << "\"";
-		return SendClose (request_token, service_id, model_type, item_name, item_name_len, use_attribinfo_in_updates,
-					RSSL_SC_NOT_ENTITLED, kErrorMalformedRequest.c_str(), kErrorMalformedRequest.size());
+		LOG(INFO) << prefix_ << "Closing invalid request for \"" << item_name << "\"";
+		return SendClose (request_token, service_id, model_type, item_name.c_str(), item_name.size(), use_attribinfo_in_updates,
+					RSSL_SC_NOT_ENTITLED, kErrorMalformedRequest);
 	}
 /* require a NULL terminated string */
 	underlying_symbol_.assign (url_.c_str() + file_name.begin, file_name.len);
 
-/* extract out timestamp */
-	boost::posix_time::ptime timestamp (boost::posix_time::not_a_date_time);
-	if (parsed.query.is_valid()) {
-		url_parse::Component query = parsed.query;
-		url_parse::Component key_range, value_range;
-		boost::posix_time::ptime t;
-
-/* For each key-value pair, i.e. ?a=x&b=y&c=z -> (a,x) (b,y) (c,z)
- */
-		while (url_parse::ExtractQueryKeyValue (url_.c_str(), &query, &key_range, &value_range))
-		{
-/* Lazy std::string conversion for key
- */
-			const chromium::StringPiece key (url_.c_str() + key_range.begin, key_range.len);
-/* Value must convert to add NULL terminator for conversion APIs.
- */
-			value_.assign (url_.c_str() + value_range.begin, value_range.len);
-			LOG(INFO) << "key [" << key << "]";
-			if (key == "t") {
-/* Disabling exceptions in boost::posix_time::time_duration requires stringstream which requires a string to initialise.
- */
-				iss_.str (value_);
-				if (iss_ >> t) {timestamp = t;
-				LOG(INFO) << "timestamp = " << timestamp; }
-			}
-		}
+	const bool is_streaming_request = (RSSL_RQMF_STREAMING == (request_msg->flags & RSSL_RQMF_STREAMING));
+	const uint8_t stream_state = is_streaming_request ? RSSL_STREAM_OPEN : RSSL_STREAM_NON_STREAMING;
+	if (is_streaming_request) {
+		cumulative_stats_[CLIENT_PC_ITEM_STREAMING_REQUEST_RECEIVED]++;
+	} else {
+		cumulative_stats_[CLIENT_PC_ITEM_SNAPSHOT_REQUEST_RECEIVED]++;
 	}
-	if (timestamp.is_not_a_date_time())
-		timestamp = boost::posix_time::second_clock::local_time();
-
-	if (provider_->AddRequest (request_token, shared_from_this()))
-	{
-		return SendInitial (service_id, request_token, item_name, item_name_len, timestamp);
-/* wait for close */
+	using namespace boost::gregorian;
+    	using namespace boost::posix_time;
+	date d (day_clock::universal_day());
+	ptime t1 (d, hours (9)), t2 (d, hours (10));
+	time_period tp (t1, t2);
+	vta::test_t vta (prefix_, rwf_version(), request_token, service_id, item_name, tp);
+	if (!vta.Calculate ("MSFT.O")) {
+		return SendClose (request_token, service_id, model_type, item_name.c_str(), item_name.size(), use_attribinfo_in_updates,
+					RSSL_SC_ERROR, kErrorInternal);
 	}
-	else
-	{
-/* Reissue request for secondary subscribers */
+#if 0
+	const auto it = tokens_.find (request_token);
+	if (it == tokens_.end()) {
+		auto request = std::make_shared<request_t> (stream_state);
+		auto token_ret = tokens_.emplace (std::make_pair (request_token, request));
+/* 2.8.1. Snapshot and Streaming Requests
+ * A provider may also set the streamState to RSSL_STREAM_NON_STREAMING if it does not allow streaming of the 
+ * requested item.  */
+		bool rc = SendRefresh (request_token, service_id, item_name.c_str(), item_name.size(), RSSL_STREAM_NON_STREAMING);
+		tokens_.erase (token_ret.first);
+		return rc;
+	} else {
 		cumulative_stats_[CLIENT_PC_ITEM_REISSUE_REQUEST_RECEIVED]++;
-		return SendInitial (service_id, request_token, item_name, item_name_len, timestamp);
+		return SendRefresh (request_token, service_id, item_name.c_str(), item_name.size(), RSSL_STREAM_NON_STREAMING);
 	}
+#else
+	RsslBuffer* buf;
+	RsslError rssl_err;
+	buf = rsslGetBuffer (handle_, MAX_MSG_SIZE, RSSL_FALSE /* not packed */, &rssl_err);
+	if (nullptr == buf) {
+		LOG(ERROR) << prefix_ << "rsslGetBuffer: { "
+			  "\"rsslErrorId\": " << rssl_err.rsslErrorId << ""
+			", \"sysError\": " << rssl_err.sysError << ""
+			", \"text\": \"" << rssl_err.text << "\""
+			", \"size\": " << MAX_MSG_SIZE << ""
+			", \"packedBuffer\": false"
+			" }";
+		return false;
+	}
+/* temporary to work around rtrUInt32 <-> size_t */
+	size_t length = buf->length;
+	if (!vta.WriteRaw (buf->data, &length)) {
+		goto cleanup;
+	}
+	buf->length = static_cast<uint32_t> (length);
+	if (!Submit (buf)) {
+		goto cleanup;
+	}
+	cumulative_stats_[CLIENT_PC_ITEM_SENT]++;
+	return true;
+cleanup:
+	if (RSSL_RET_SUCCESS != rsslReleaseBuffer (buf, &rssl_err)) {
+		LOG(WARNING) << prefix_ << "rsslReleaseBuffer: { "
+			  "\"rsslErrorId\": " << rssl_err.rsslErrorId << ""
+			", \"sysError\": " << rssl_err.sysError << ""
+			", \"text\": \"" << rssl_err.text << "\""
+			" }";
+	}
+	return false;
+#endif
 }
 
 bool
@@ -928,11 +895,6 @@ hitsuji::client_t::OnCloseMsg (
 	cumulative_stats_[CLIENT_PC_CLOSE_MSGS_RECEIVED]++;
 	switch (close_msg->msgBase.domainType) {
 	case RSSL_DMT_MARKET_PRICE:
-	case RSSL_DMT_MARKET_BY_ORDER:
-	case RSSL_DMT_MARKET_BY_PRICE:
-	case RSSL_DMT_MARKET_MAKER:
-	case RSSL_DMT_SYMBOL_LIST:
-	case RSSL_DMT_YIELD_CURVE:
 		return OnItemClose (close_msg);
 	case RSSL_DMT_LOGIN:
 /* toggle login status. */
@@ -955,6 +917,11 @@ hitsuji::client_t::OnCloseMsg (
 	case RSSL_DMT_DICTIONARY:
 /* dictionary is unsupported so a usage error. */
 		cumulative_stats_[CLIENT_PC_MMT_DICTIONARY_CLOSE_RECEIVED]++;
+	case RSSL_DMT_MARKET_BY_ORDER:
+	case RSSL_DMT_MARKET_BY_PRICE:
+	case RSSL_DMT_MARKET_MAKER:
+	case RSSL_DMT_SYMBOL_LIST:
+	case RSSL_DMT_YIELD_CURVE:
 	default:
 		cumulative_stats_[CLIENT_PC_CLOSE_MSGS_DISCARDED]++;
 		LOG(WARNING) << prefix_ << "Uncaught close message: " << close_msg;
@@ -975,8 +942,7 @@ hitsuji::client_t::OnItemClose (
 
 	const uint16_t service_id    = close_msg->msgBase.msgKey.serviceId;
 	const uint8_t  model_type    = close_msg->msgBase.domainType;
-	const char*    item_name     = close_msg->msgBase.msgKey.name.data;
-	const size_t   item_name_len = close_msg->msgBase.msgKey.name.length;
+	const std::string item_name (close_msg->msgBase.msgKey.name.data, close_msg->msgBase.msgKey.name.length);
 /* Close message does not define this flag, go with lowest common denominator. */
 	const bool use_attribinfo_in_updates = true;
 
@@ -991,510 +957,25 @@ hitsuji::client_t::OnItemClose (
 	}
 
 /* Verify domain model */
-	if (RSSL_DMT_MARKET_PRICE != model_type)
-	{
+	if (RSSL_DMT_MARKET_PRICE != model_type) {
 		cumulative_stats_[CLIENT_PC_CLOSE_MSGS_DISCARDED]++;
 		LOG(INFO) << prefix_ << "Discarding close request for unsupported message model type.";
 		return true;
 	}
 
-	if (!provider_->RemoveRequest (request_token))
-	{
+/* Remove token */
+	const auto it = tokens_.find (request_token);
+	if (it == tokens_.end()) {
 		cumulative_stats_[CLIENT_PC_CLOSE_MSGS_DISCARDED]++;
 		LOG(INFO) << prefix_ << "Discarding close request on closed item.";
-	}
-	else
-	{		
+	} else {		
+		tokens_.erase (it);
 		cumulative_stats_[CLIENT_PC_ITEM_CLOSED]++;
 		DLOG(INFO) << prefix_ << "Closed open request.";
 	}
+/* Question: close on streaming or non-streaming request? */
 	return true;
 }
-
-/* Initial images and refresh images for reissue requests.
- */
-bool
-hitsuji::client_t::SendInitial (
-	uint16_t service_id,
-	int32_t token,
-	const char* name,
-	size_t name_len,
-	const boost::posix_time::ptime& timestamp
-	)
-{
-/* 7.4.8.1 Create a response message (4.2.2) */
-	RsslRefreshMsg response = RSSL_INIT_REFRESH_MSG;
-#ifndef NDEBUG
-	RsslEncodeIterator it = RSSL_INIT_ENCODE_ITERATOR;
-#else
-	RsslEncodeIterator it;
-	rsslClearEncodeIterator (&it);
-#endif
-	RsslBuffer* buf;
-	RsslError rssl_err;
-	RsslRet rc;
-
-	DCHECK (name_len > 0);
-	DCHECK (nullptr != name);
-
-/* 7.4.8.3 Set the message model type of the response. */
-	response.msgBase.domainType = RSSL_DMT_MARKET_PRICE;
-/* 7.4.8.4 Set response type, response type number, and indication mask. */
-	response.msgBase.msgClass = RSSL_MC_REFRESH;
-/* for snapshot images do not cache */
-	response.flags = RSSL_RFMF_SOLICITED        |
-			 RSSL_RFMF_REFRESH_COMPLETE |
-			 RSSL_RFMF_DO_NOT_CACHE;
-/* RDM field list. */
-	response.msgBase.containerType = RSSL_DT_FIELD_LIST;
-
-/* 7.4.8.2 Create or re-use a request attribute object (4.2.4) */
-	response.msgBase.msgKey.serviceId   = service_id;
-	response.msgBase.msgKey.nameType    = RDM_INSTRUMENT_NAME_TYPE_RIC;
-	response.msgBase.msgKey.name.data   = const_cast<char*> (name);
-	response.msgBase.msgKey.name.length = static_cast<uint32_t> (name_len);
-	LOG(INFO) << "data: [" << std::string (name, name_len) << "], length: " << name_len;
-	response.msgBase.msgKey.flags = RSSL_MKF_HAS_SERVICE_ID | RSSL_MKF_HAS_NAME_TYPE | RSSL_MKF_HAS_NAME;
-	response.flags |= RSSL_RFMF_HAS_MSG_KEY;
-/* Set the request token. */
-	response.msgBase.streamId = token;
-
-/** Optional: but require to replace stale values in cache when stale values are supported. **/
-/* Item interaction state: Open, Closed, ClosedRecover, Redirected, NonStreaming, or Unspecified. */
-	response.state.streamState = RSSL_STREAM_OPEN;
-/* Data quality state: Ok, Suspect, or Unspecified. */
-	response.state.dataState = RSSL_DATA_OK;
-/* Error code, e.g. NotFound, InvalidArgument, ... */
-	response.state.code = RSSL_SC_NONE;
-
-	buf = rsslGetBuffer (handle_, MAX_MSG_SIZE, RSSL_FALSE /* not packed */, &rssl_err);
-	if (nullptr == buf) {
-		LOG(ERROR) << prefix_ << "rsslGetBuffer: { "
-			  "\"rsslErrorId\": " << rssl_err.rsslErrorId << ""
-			", \"sysError\": " << rssl_err.sysError << ""
-			", \"text\": \"" << rssl_err.text << "\""
-			", \"size\": " << MAX_MSG_SIZE << ""
-			", \"packedBuffer\": false"
-			" }";
-		return false;
-	}
-	rc = rsslSetEncodeIteratorBuffer (&it, buf);
-	if (RSSL_RET_SUCCESS != rc) {
-		LOG(ERROR) << prefix_ << "rsslSetEncodeIteratorBuffer: { "
-			  "\"returnCode\": " << static_cast<signed> (rc) << ""
-			", \"enumeration\": \"" << rsslRetCodeToString (rc) << "\""
-			", \"text\": \"" << rsslRetCodeInfo (rc) << "\""
-			" }";
-		goto cleanup;
-	}
-	rc = rsslSetEncodeIteratorRWFVersion (&it, GetRwfMajorVersion(), GetRwfMinorVersion());
-	if (RSSL_RET_SUCCESS != rc) {
-		LOG(ERROR) << prefix_ << "rsslSetEncodeIteratorRWFVersion: { "
-			  "\"returnCode\": " << static_cast<signed> (rc) << ""
-			", \"enumeration\": \"" << rsslRetCodeToString (rc) << "\""
-			", \"text\": \"" << rsslRetCodeInfo (rc) << "\""
-			", \"majorVersion\": " << static_cast<unsigned> (GetRwfMajorVersion()) << ""
-			", \"minorVersion\": " << static_cast<unsigned> (GetRwfMinorVersion()) << ""
-			" }";
-		goto cleanup;
-	}
-	rc = rsslEncodeMsgInit (&it, reinterpret_cast<RsslMsg*> (&response), /* maximum size */ 0);
-	if (RSSL_RET_ENCODE_CONTAINER != rc) {
-		LOG(ERROR) << prefix_ << "rsslEncodeMsgInit: { "
-			  "\"returnCode\": " << static_cast<signed> (rc) << ""
-			", \"enumeration\": \"" << rsslRetCodeToString (rc) << "\""
-			", \"text\": \"" << rsslRetCodeInfo (rc) << "\""
-			" }";
-		goto cleanup;
-	}
-	{
-/* 4.3.1 RespMsg.Payload */
-/* TIMEACT & ACTIV_DATE */
-		struct tm _tm;
-		__time32_t time32 = to_unix_epoch<__time32_t> (timestamp);
-		_gmtime32_s (&_tm, &time32);
-
-/* Clear required for SingleWriteIterator state machine. */
-		RsslFieldList field_list;
-		RsslFieldEntry field;
-		RsslBuffer data_buffer;
-		RsslReal rssl_real;
-		RsslTime rssl_time;
-		RsslDate rssl_date;
-
-		rsslClearFieldList (&field_list);
-		rsslClearFieldEntry (&field);
-		rsslClearReal (&rssl_real);
-
-		field_list.flags = RSSL_FLF_HAS_STANDARD_DATA;
-		rc = rsslEncodeFieldListInit (&it, &field_list, 0 /* summary data */, 0 /* payload */);
-		if (RSSL_RET_SUCCESS != rc) {
-			LOG(ERROR) << prefix_ << "rsslEncodeFieldListInit: { "
-				  "\"returnCode\": " << static_cast<signed> (rc) << ""
-				", \"enumeration\": \"" << rsslRetCodeToString (rc) << "\""
-				", \"text\": \"" << rsslRetCodeInfo (rc) << "\""
-				", \"flags\": \"RSSL_FLF_HAS_STANDARD_DATA\""
-				" }";
-			goto cleanup;
-		}
-
-/* For each field set the Id via a FieldEntry bound to the iterator followed by setting the data.
- * The iterator API provides setters for common types excluding 32-bit floats, with fallback to 
- * a generic DataBuffer API for other types or support of pre-calculated values.
- */
-/* PROD_PERM */
-		field.fieldId  = kRdmProductPermissionId;
-		field.dataType = RSSL_DT_UINT;
-		const uint64_t prod_perm = 213;		/* for JPY= */
-		rc = rsslEncodeFieldEntry (&it, &field, &prod_perm);
-		if (RSSL_RET_SUCCESS != rc) {
-			LOG(ERROR) << prefix_ << "rsslEncodeFieldEntry: { "
-				  "\"returnCode\": " << static_cast<signed> (rc) << ""
-				", \"enumeration\": \"" << rsslRetCodeToString (rc) << "\""
-				", \"text\": \"" << rsslRetCodeInfo (rc) << "\""
-				", \"fieldId\": " << field.fieldId << ""
-				", \"dataType\": \"" << rsslDataTypeToString (field.dataType) << "\""
-				", \"productPermission\": " << prod_perm << ""
-				" }";
-			goto cleanup;
-		}
-
-/* PREF_DISP */
-		field.fieldId  = kRdmPreferredDisplayTemplateId;
-		field.dataType = RSSL_DT_UINT;
-		const uint64_t pref_disp = 6205;	/* for JPY= */
-		rc = rsslEncodeFieldEntry (&it, &field, &pref_disp);
-		if (RSSL_RET_SUCCESS != rc) {
-			LOG(ERROR) << prefix_ << "rsslEncodeFieldEntry: { "
-				  "\"returnCode\": " << static_cast<signed> (rc) << ""
-				", \"enumeration\": \"" << rsslRetCodeToString (rc) << "\""
-				", \"text\": \"" << rsslRetCodeInfo (rc) << "\""
-				", \"fieldId\": " << field.fieldId << ""
-				", \"dataType\": \"" << rsslDataTypeToString (field.dataType) << "\""
-				", \"preferredDisplayTemplate\": " << pref_disp << ""
-				" }";
-			goto cleanup;
-		}
-
-/* BKGD_REF */
-		field.fieldId  = kRdmBackroundReferenceId;
-		field.dataType = RSSL_DT_ASCII_STRING;
-		const std::string bkgd_ref ("Japanese Yen");
-		data_buffer.data   = const_cast<char*> (bkgd_ref.c_str());
-		data_buffer.length = static_cast<uint32_t> (bkgd_ref.size());
-		rc = rsslEncodeFieldEntry (&it, &field, &data_buffer);
-		if (RSSL_RET_SUCCESS != rc) {
-			LOG(ERROR) << prefix_ << "rsslEncodeFieldEntry: { "
-				  "\"returnCode\": " << static_cast<signed> (rc) << ""
-				", \"enumeration\": \"" << rsslRetCodeToString (rc) << "\""
-				", \"text\": \"" << rsslRetCodeInfo (rc) << "\""
-				", \"fieldId\": " << field.fieldId << ""
-				", \"dataType\": \"" << rsslDataTypeToString (field.dataType) << "\""
-				", \"backgroundReference\": \"" << bkgd_ref << "\""
-				" }";
-			goto cleanup;
-		}
-
-/* GV1_TEXT */
-		field.fieldId  = kRdmGeneralText1Id;
-		field.dataType = RSSL_DT_RMTES_STRING;
-		const std::string gv1_text ("SPOT");
-		data_buffer.data   = const_cast<char*> (gv1_text.c_str());
-		data_buffer.length = static_cast<uint32_t> (gv1_text.size());
-		rc = rsslEncodeFieldEntry (&it, &field, &data_buffer);
-		if (RSSL_RET_SUCCESS != rc) {
-			LOG(ERROR) << prefix_ << "rsslEncodeFieldEntry: { "
-				  "\"returnCode\": " << static_cast<signed> (rc) << ""
-				", \"enumeration\": \"" << rsslRetCodeToString (rc) << "\""
-				", \"text\": \"" << rsslRetCodeInfo (rc) << "\""
-				", \"fieldId\": " << field.fieldId << ""
-				", \"dataType\": \"" << rsslDataTypeToString (field.dataType) << "\""
-				", \"generalText1\": \"" << gv1_text << "\""
-				" }";
-			goto cleanup;
-		}
-
-/* GV2_TEXT */
-		field.fieldId  = kRdmGeneralText2Id;
-		field.dataType = RSSL_DT_RMTES_STRING;
-		const std::string gv2_text ("USDJPY");
-		data_buffer.data   = const_cast<char*> (gv2_text.c_str());
-		data_buffer.length = static_cast<uint32_t> (gv2_text.size());
-		rc = rsslEncodeFieldEntry (&it, &field, &data_buffer);
-		if (RSSL_RET_SUCCESS != rc) {
-			LOG(ERROR) << prefix_ << "rsslEncodeFieldEntry: { "
-				  "\"returnCode\": " << static_cast<signed> (rc) << ""
-				", \"enumeration\": \"" << rsslRetCodeToString (rc) << "\""
-				", \"text\": \"" << rsslRetCodeInfo (rc) << "\""
-				", \"fieldId\": " << field.fieldId << ""
-				", \"dataType\": \"" << rsslDataTypeToString (field.dataType) << "\""
-				", \"generalText2\": \"" << gv2_text << "\""
-				" }";
-			goto cleanup;
-		}
-
-/* PRIMACT_1 */
-		field.fieldId  = kRdmPrimaryActivity1Id;
-		field.dataType = RSSL_DT_REAL;
-		const double bid = 82.20;
-		rssl_real.value = rounding::mantissa (bid);
-		rssl_real.hint  = RSSL_RH_EXPONENT_2;
-		rc = rsslEncodeFieldEntry (&it, &field, &rssl_real);
-		if (RSSL_RET_SUCCESS != rc) {
-			LOG(ERROR) << prefix_ << "rsslEncodeFieldEntry: { "
-				  "\"returnCode\": " << static_cast<signed> (rc) << ""
-				", \"enumeration\": \"" << rsslRetCodeToString (rc) << "\""
-				", \"text\": \"" << rsslRetCodeInfo (rc) << "\""
-				", \"fieldId\": " << field.fieldId << ""
-				", \"dataType\": \"" << rsslDataTypeToString (field.dataType) << "\""
-				", \"primaryActivity1\": { "
-					  "\"isBlank\": " << (rssl_real.isBlank ? "true" : "false") << ""
-					", \"value\": " << rssl_real.value << ""
-					", \"hint\": \"" << internal::real_hint_string (static_cast<RsslRealHints> (rssl_real.hint)) << "\""
-				" }"
-				" }";
-			goto cleanup;
-		}
-
-/* SEC_ACT_1 */
-		field.fieldId  = kRdmSecondActivity1Id;
-		field.dataType = RSSL_DT_REAL;
-		const double ask = 82.22;
-		rssl_real.value = rounding::mantissa (ask);
-		rssl_real.hint  = RSSL_RH_EXPONENT_2;
-		rc = rsslEncodeFieldEntry (&it, &field, &rssl_real);
-		if (RSSL_RET_SUCCESS != rc) {
-			LOG(ERROR) << prefix_ << "rsslEncodeFieldEntry: { "
-				  "\"returnCode\": " << static_cast<signed> (rc) << ""
-				", \"enumeration\": \"" << rsslRetCodeToString (rc) << "\""
-				", \"text\": \"" << rsslRetCodeInfo (rc) << "\""
-				", \"fieldId\": " << field.fieldId << ""
-				", \"dataType\": \"" << rsslDataTypeToString (field.dataType) << "\""
-				", \"secondActivity1\": { "
-					  "\"isBlank\": " << (rssl_real.isBlank ? "true" : "false") << ""
-					", \"value\": " << rssl_real.value << ""
-					", \"hint\": \"" << internal::real_hint_string (static_cast<RsslRealHints> (rssl_real.hint)) << "\""
-				" }"
-				" }";
-			goto cleanup;
-		}
-
-/* CTBTR_1 */
-		field.fieldId  = kRdmContributor1Id;
-		field.dataType = RSSL_DT_RMTES_STRING;
-		const std::string ctbtr_1 ("RBS");
-		data_buffer.data   = const_cast<char*> (ctbtr_1.c_str());
-		data_buffer.length = static_cast<uint32_t> (ctbtr_1.size());
-		rc = rsslEncodeFieldEntry (&it, &field, &data_buffer);
-		if (RSSL_RET_SUCCESS != rc) {
-			LOG(ERROR) << prefix_ << "rsslEncodeFieldEntry: { "
-				  "\"returnCode\": " << static_cast<signed> (rc) << ""
-				", \"enumeration\": \"" << rsslRetCodeToString (rc) << "\""
-				", \"text\": \"" << rsslRetCodeInfo (rc) << "\""
-				", \"fieldId\": " << field.fieldId << ""
-				", \"dataType\": \"" << rsslDataTypeToString (field.dataType) << "\""
-				", \"contributor1\": \"" << ctbtr_1 << "\""
-				" }";
-			goto cleanup;
-		}
-
-/* CTB_LOC1 */
-		field.fieldId  = kRdmContributorLocation1Id;
-		field.dataType = RSSL_DT_RMTES_STRING;
-		const std::string ctb_loc1 ("XST");
-		data_buffer.data   = const_cast<char*> (ctb_loc1.c_str());
-		data_buffer.length = static_cast<uint32_t> (ctb_loc1.size());
-		rc = rsslEncodeFieldEntry (&it, &field, &data_buffer);
-		if (RSSL_RET_SUCCESS != rc) {
-			LOG(ERROR) << prefix_ << "rsslEncodeFieldEntry: { "
-				  "\"returnCode\": " << static_cast<signed> (rc) << ""
-				", \"enumeration\": \"" << rsslRetCodeToString (rc) << "\""
-				", \"text\": \"" << rsslRetCodeInfo (rc) << "\""
-				", \"fieldId\": " << field.fieldId << ""
-				", \"dataType\": \"" << rsslDataTypeToString (field.dataType) << "\""
-				", \"contributorLocation1\": \"" << ctb_loc1 << "\""
-				" }";
-			goto cleanup;
-		}
-
-/* CTB_PAGE1 */
-		field.fieldId  = kRdmContributorPage1Id;
-		field.dataType = RSSL_DT_RMTES_STRING;
-		const std::string ctb_page1 ("1RBS");
-		data_buffer.data   = const_cast<char*> (ctb_page1.c_str()); 
-		data_buffer.length = static_cast<uint32_t> (ctb_page1.size());
-		rc = rsslEncodeFieldEntry (&it, &field, &data_buffer);
-		if (RSSL_RET_SUCCESS != rc) {
-			LOG(ERROR) << prefix_ << "rsslEncodeFieldEntry: { "
-				  "\"returnCode\": " << static_cast<signed> (rc) << ""
-				", \"enumeration\": \"" << rsslRetCodeToString (rc) << "\""
-				", \"text\": \"" << rsslRetCodeInfo (rc) << "\""
-				", \"fieldId\": " << field.fieldId << ""
-				", \"dataType\": \"" << rsslDataTypeToString (field.dataType) << "\""
-				", \"contributorPage1\": \"" << ctb_page1 << "\""
-				" }";
-			goto cleanup;
-		}
-
-/* DLG_CODE1 */
-		field.fieldId  = kRdmDealingCode1Id;
-		field.dataType = RSSL_DT_RMTES_STRING;
-		const std::string dlg_code1 ("RBSN");
-		data_buffer.data   = const_cast<char*> (dlg_code1.c_str());
-		data_buffer.length = static_cast<uint32_t> (dlg_code1.size());
-		rc = rsslEncodeFieldEntry (&it, &field, &data_buffer);
-		if (RSSL_RET_SUCCESS != rc) {
-			LOG(ERROR) << prefix_ << "rsslEncodeFieldEntry: { "
-				  "\"returnCode\": " << static_cast<signed> (rc) << ""
-				", \"enumeration\": \"" << rsslRetCodeToString (rc) << "\""
-				", \"text\": \"" << rsslRetCodeInfo (rc) << "\""
-				", \"fieldId\": " << field.fieldId << ""
-				", \"dataType\": \"" << rsslDataTypeToString (field.dataType) << "\""
-				", \"dealingCode1\": \"" << dlg_code1 << "\""
-				" }";
-			goto cleanup;
-		}
-
-/* VALUE_TS1 */
-		field.fieldId  = kRdmActivityTime1Id;
-		field.dataType = RSSL_DT_TIME;
-		rssl_time.hour = _tm.tm_hour; rssl_time.minute = _tm.tm_min; rssl_time.second = _tm.tm_sec; rssl_time.millisecond = 0;
-		rc = rsslEncodeFieldEntry (&it, &field, &rssl_time);
-		if (RSSL_RET_SUCCESS != rc) {
-			LOG(ERROR) << "rsslEncodeFieldEntry: { "
-				  "\"returnCode\": " << static_cast<signed> (rc) << ""
-				", \"enumeration\": \"" << rsslRetCodeToString (rc) << "\""
-				", \"text\": \"" << rsslRetCodeInfo (rc) << "\""
-				", \"fieldId\": " << field.fieldId << ""
-				", \"dataType\": \"" << rsslDataTypeToString (field.dataType) << "\""
-				", \"activityTime1\": { "
-					  "\"hour\": " << rssl_time.hour << ""
-					", \"minute\": " << rssl_time.minute << ""
-					", \"second\": " << rssl_time.second << ""
-					", \"millisecond\": " << rssl_time.millisecond << ""
-				" }"
-				" }";
-			goto cleanup;
-		}
-
-/* VALUE_DT1 */
-		field.fieldId  = kRdmActivityDate1Id;
-		field.dataType = RSSL_DT_DATE;
-		rssl_date.year  = /* upa(yyyy) */ 1900 + _tm.tm_year /* tm(yyyy-1900 */;
-		rssl_date.month = /* upa(1-12) */    1 + _tm.tm_mon  /* tm(0-11) */;
-		rssl_date.day   = /* upa(1-31) */        _tm.tm_mday /* tm(1-31) */;
-		rc = rsslEncodeFieldEntry (&it, &field, &rssl_date);
-		if (RSSL_RET_SUCCESS != rc) {
-			LOG(ERROR) << prefix_ << "rsslEncodeFieldEntry: { "
-				  "\"returnCode\": " << static_cast<signed> (rc) << ""
-				", \"enumeration\": \"" << rsslRetCodeToString (rc) << "\""
-				", \"text\": \"" << rsslRetCodeInfo (rc) << "\""
-				", \"fieldId\": " << field.fieldId << ""
-				", \"dataType\": \"" << rsslDataTypeToString (field.dataType) << "\""
-				", \"activityDate1\": { "
-					  "\"year\": " << rssl_date.year << ""
-					", \"month\": " << rssl_date.month << ""
-					", \"day\": " << rssl_date.day << ""
-				" }"
-				" }";
-			goto cleanup;
-		}
-
-		rc = rsslEncodeFieldListComplete (&it, RSSL_TRUE /* commit */);
-		if (RSSL_RET_SUCCESS != rc) {
-			LOG(ERROR) << prefix_ << "rsslEncodeFieldListComplete: { "
-				  "\"returnCode\": " << static_cast<signed> (rc) << ""
-				", \"enumeration\": \"" << rsslRetCodeToString (rc) << "\""
-				", \"text\": \"" << rsslRetCodeInfo (rc) << "\""
-				" }";
-			goto cleanup;
-		}
-	}
-/* finalize multi-step encoder */
-	rc = rsslEncodeMsgComplete (&it, RSSL_TRUE /* commit */);
-	if (RSSL_RET_SUCCESS != rc) {
-		LOG(ERROR) << prefix_ << "rsslEncodeMsgComplete: { "
-			  "\"returnCode\": " << static_cast<signed> (rc) << ""
-			", \"enumeration\": \"" << rsslRetCodeToString (rc) << "\""
-			", \"text\": \"" << rsslRetCodeInfo (rc) << "\""
-			" }";
-		goto cleanup;
-	}
-	buf->length = rsslGetEncodedBufferLength (&it);
-	LOG_IF(WARNING, 0 == buf->length) << prefix_ << "rsslGetEncodedBufferLength returned 0.";
-
-	if (DCHECK_IS_ON()) {
-/* Message validation: must use ASSERT libraries for error description :/ */
-		if (!rsslValidateMsg (reinterpret_cast<RsslMsg*> (&response))) {
-			cumulative_stats_[CLIENT_PC_ITEM_MALFORMED]++;
-			LOG(ERROR) << prefix_ << "rsslValidateMsg failed.";
-			goto cleanup;
-		} else {
-			cumulative_stats_[CLIENT_PC_ITEM_VALIDATED]++;
-			LOG(INFO) << prefix_ << "rsslValidateMsg succeeded.";
-		}
-	}
-
-	if (!Submit (buf)) {
-		goto cleanup;
-	}
-	cumulative_stats_[CLIENT_PC_ITEM_SENT]++;
-	return true;
-cleanup:
-	if (RSSL_RET_SUCCESS != rsslReleaseBuffer (buf, &rssl_err)) {
-		LOG(WARNING) << prefix_ << "rsslReleaseBuffer: { "
-			  "\"rsslErrorId\": " << rssl_err.rsslErrorId << ""
-			", \"sysError\": " << rssl_err.sysError << ""
-			", \"text\": \"" << rssl_err.text << "\""
-			" }";
-	}
-	return false;
-}
-
-#if 0
-/* 7.4.7.1.2 Handling Consumer Client Session Events: Client session connection
- *           has been lost.
- *
- * When the provider receives this event it should stop sending any data to that
- * client session. Then it should remove references to the client session handle
- * and its associated request tokens.
- */
-void
-hitsuji::client_t::OnOMMInactiveClientSessionEvent (
-	const rfa::sessionLayer::OMMInactiveClientSessionEvent& session_event
-	)
-{
-	DCHECK(nullptr != handle_);
-	cumulative_stats_[CLIENT_PC_OMM_INACTIVE_CLIENT_SESSION_RECEIVED]++;
-	try {
-/* reject new item requests. */
-		is_logged_in_ = false;
-/* remove requests from item streams. */
-		VLOG(2) << prefix_ << "Removing client from " << items_.size() << " item streams.";
-		std::for_each (items_.begin(), items_.end(),
-			[&](const std::pair<rfa::sessionLayer::RequestToken*, std::weak_ptr<item_stream_t>>& item)
-		{
-			auto stream = item.second.lock();
-			if (!(bool)stream)
-				return;
-			boost::upgrade_lock<boost::shared_mutex> lock (stream->lock);
-			auto it = stream->requests.find (item.first);
-			DCHECK(stream->requests.end() != it);
-			boost::upgrade_to_unique_lock<boost::shared_mutex> uniqueLock (lock);
-			stream->requests.erase (it);
-			VLOG(2) << prefix_ << stream->rfa_name;
-		});
-/* forward upstream to remove reference to this. */
-		provider_->EraseClientSession (handle_);
-/* handle is now invalid. */
-		handle_ = nullptr;
-/* ignore any error */
-	} catch (const std::exception& e) {
-		LOG(ERROR) << prefix_ << "Exception: { "
-			"\"What\": \"" << e.what() << "\" }";
-	}
-}
-#endif
 
 /* 10.3.4 Providing Service Directory (Interactive)
  * A Consumer typically requests a Directory from a Provider to retrieve
@@ -1583,14 +1064,14 @@ hitsuji::client_t::SendDirectoryResponse (
 		goto cleanup;
 	}
 /* encode with clients preferred protocol version */
-	rc = rsslSetEncodeIteratorRWFVersion (&it, GetRwfMajorVersion(), GetRwfMinorVersion());
+	rc = rsslSetEncodeIteratorRWFVersion (&it, rwf_major_version(), rwf_minor_version());
 	if (RSSL_RET_SUCCESS != rc) {
 		LOG(ERROR) << prefix_ << "rsslSetEncodeIteratorRWFVersion: { "
 			  "\"returnCode\": " << static_cast<signed> (rc) << ""
 			", \"enumeration\": \"" << rsslRetCodeToString (rc) << "\""
 			", \"text\": \"" << rsslRetCodeInfo (rc) << "\""
-			", \"majorVersion\": " << static_cast<unsigned> (GetRwfMajorVersion()) << ""
-			", \"minorVersion\": " << static_cast<unsigned> (GetRwfMinorVersion()) << ""
+			", \"majorVersion\": " << static_cast<unsigned> (rwf_major_version()) << ""
+			", \"minorVersion\": " << static_cast<unsigned> (rwf_minor_version()) << ""
 			" }";
 		goto cleanup;
 	}
@@ -1659,8 +1140,7 @@ hitsuji::client_t::SendClose (
 	size_t name_len,
 	bool use_attribinfo_in_updates,
 	uint8_t status_code,
-	const char* text,
-	size_t text_len
+	const std::string& status_text
 	)
 {
 	RsslStatusMsg response = RSSL_INIT_STATUS_MSG;
@@ -1687,7 +1167,7 @@ hitsuji::client_t::SendClose (
 		", \"NameLen\": " << name_len << ""
 		", \"AttribInfoInUpdates\": " << (use_attribinfo_in_updates ? "true" : "false") << ""
 		", \"StatusCode\": " << rsslStateCodeToString (status_code) << ""
-		", \"StatusText\": \"" << std::string (text, text_len) << "\""
+		", \"StatusText\": \"" << status_text << "\""
 		" }";
 
 /* 7.5.9.2 Set the message model type of the response. */
@@ -1715,12 +1195,13 @@ hitsuji::client_t::SendClose (
 /* Item interaction state. */
 	response.state.streamState = RSSL_STREAM_CLOSED;
 /* Data quality state. */
-	response.state.dataState = RSSL_DATA_OK;
+	response.state.dataState = RSSL_DATA_SUSPECT;
 /* 11.2.6.1 Structure Members
  * Note: An application should not trigger specific behavior based on this content
  */
 	response.state.code = status_code;
-	/* response.state.text */ /* Maximum 32,767 bytes, 1-11361563014: text encoding undefined. */
+	response.state.text.data = const_cast<char*> (status_text.c_str()); /* 1-11361563014: text encoding undefined */
+	response.state.text.length = static_cast<uint32_t> (status_text.size()); /* Maximum 32,767 bytes */
 
 	buf = rsslGetBuffer (handle_, MAX_MSG_SIZE, RSSL_FALSE /* not packed */, &rssl_err);
 	if (nullptr == buf) {
@@ -1742,14 +1223,14 @@ hitsuji::client_t::SendClose (
 			" }";
 		goto cleanup;
 	}
-	rc = rsslSetEncodeIteratorRWFVersion (&it, GetRwfMajorVersion(), GetRwfMinorVersion());
+	rc = rsslSetEncodeIteratorRWFVersion (&it, rwf_major_version(), rwf_minor_version());
 	if (RSSL_RET_SUCCESS != rc) {
 		LOG(ERROR) << prefix_ << "rsslSetEncodeIteratorRWFVersion: { "
 			  "\"returnCode\": " << static_cast<signed> (rc) << ""
 			", \"enumeration\": \"" << rsslRetCodeToString (rc) << "\""
 			", \"text\": \"" << rsslRetCodeInfo (rc) << "\""
-			", \"majorVersion\": " << static_cast<unsigned> (GetRwfMajorVersion()) << ""
-			", \"minorVersion\": " << static_cast<unsigned> (GetRwfMinorVersion()) << ""
+			", \"majorVersion\": " << static_cast<unsigned> (rwf_major_version()) << ""
+			", \"minorVersion\": " << static_cast<unsigned> (rwf_minor_version()) << ""
 			" }";
 		goto cleanup;
 	}

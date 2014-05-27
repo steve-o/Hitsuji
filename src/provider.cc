@@ -118,6 +118,26 @@ hitsuji::provider_t::Close()
 	RsslError rssl_err;
 	RsslRet rc;
 
+/* Prevent new applications from connecting by closing listening socket first. */
+	if (nullptr != rssl_sock_) {
+		RsslServerInfo server_info;
+		RsslError rssl_err;
+		VLOG(3) << "Closing RSSL server socket.";
+		VLOG_IF(3, RSSL_RET_SUCCESS == rsslGetServerInfo (rssl_sock_, &server_info, &rssl_err))
+			<< "RSSL server summary: {"
+			 " \"currentBufferUsage\": " << server_info.currentBufferUsage << ""
+			", \"peakBufferUsage\": " << server_info.peakBufferUsage << ""
+			" }";
+		if (RSSL_RET_SUCCESS != rsslCloseServer (rssl_sock_, &rssl_err)) {
+			LOG(ERROR) << "rsslCloseServer: { "
+				  "\"rsslErrorId\": " << rssl_err.rsslErrorId << ""
+				", \"sysError\": " << rssl_err.sysError << ""
+				", \"text\": \"" << rssl_err.text << "\""
+				" }";
+		}
+		rssl_sock_ = nullptr;
+	}
+
 /* clients: three pass strategy */
 	VLOG_IF(3, clients_.size() > 0) << "Closing " << clients_.size() << " client sessions.";
 /* 1) send close notification */
@@ -129,7 +149,7 @@ hitsuji::provider_t::Close()
 	for (auto it = clients_.begin(); it != clients_.end(); ++it)
 	{
 		auto client = it->second;
-		RsslChannel* c = client->GetHandle();
+		RsslChannel* c = client->handle();
 /* channel still open */
 		if ((RSSL_CH_STATE_ACTIVE == c->state) &&
 /* data pending */
@@ -166,26 +186,6 @@ hitsuji::provider_t::Close()
 		Close (*it);
 	}
 	connections_.clear();
-
-/* Close RSSL server socket. */
-	if (nullptr != rssl_sock_) {
-		RsslServerInfo server_info;
-		RsslError rssl_err;
-		VLOG(3) << "Closing RSSL server socket.";
-		VLOG_IF(3, RSSL_RET_SUCCESS == rsslGetServerInfo (rssl_sock_, &server_info, &rssl_err))
-			<< "RSSL server summary: {"
-			 " \"currentBufferUsage\": " << server_info.currentBufferUsage << ""
-			", \"peakBufferUsage\": " << server_info.peakBufferUsage << ""
-			" }";
-		if (RSSL_RET_SUCCESS != rsslCloseServer (rssl_sock_, &rssl_err)) {
-			LOG(ERROR) << "rsslCloseServer: { "
-				  "\"rsslErrorId\": " << rssl_err.rsslErrorId << ""
-				", \"sysError\": " << rssl_err.sysError << ""
-				", \"text\": \"" << rssl_err.text << "\""
-				" }";
-		}
-		rssl_sock_ = nullptr;
-	}
 }
 
 void
@@ -797,40 +797,6 @@ hitsuji::provider_t::OnMsg (
 	}
 }
 
-bool
-hitsuji::provider_t::AddRequest (
-	int32_t token,
-	std::shared_ptr<hitsuji::client_t> client
-	)
-{
-	DCHECK((bool)client);
-/* read lock to find */
-	boost::upgrade_lock<boost::shared_mutex> requests_lock (requests_lock_);
-	auto it = requests_.find (token);
-	if (requests_.end() != it)
-		return false;
-/* write lock for updating requests map */
-	boost::upgrade_to_unique_lock<boost::shared_mutex> unique_requests_lock (requests_lock);
-	requests_.emplace (std::make_pair (token, client));
-	return true;
-}
-
-bool
-hitsuji::provider_t::RemoveRequest (
-	int32_t token
-	)
-{
-/* read lock to find */
-	boost::upgrade_lock<boost::shared_mutex> requests_lock (requests_lock_);
-	auto it = requests_.find (token);
-	if (requests_.end() == it)
-		return false;
-/* write lock to remove */
-	boost::upgrade_to_unique_lock<boost::shared_mutex> unique_requests_lock (requests_lock);
-	requests_.erase (it);
-	return true;
-}
-
 void
 hitsuji::provider_t::RejectClientSession (
 	RsslChannel* handle,
@@ -863,20 +829,20 @@ hitsuji::provider_t::AcceptClientSession (
 	handle->userSpecPtr = client.get();
 
 /* Determine lowest common Reuters Wire Format (RWF) version */
-	const uint16_t client_rwf_version = (client->GetRwfMajorVersion() * 256) + client->GetRwfMinorVersion();
+	const uint16_t client_rwf_version = client->rwf_version();
 	if (0 == min_rwf_version_)
 	{
 		LOG(INFO) << "Setting RWF: { "
-				  "\"MajorVersion\": " << static_cast<unsigned> (client->GetRwfMajorVersion()) <<
-				", \"MinorVersion\": " << static_cast<unsigned> (client->GetRwfMinorVersion()) <<
+				  "\"MajorVersion\": " << static_cast<unsigned> (client->rwf_major_version()) <<
+				", \"MinorVersion\": " << static_cast<unsigned> (client->rwf_minor_version()) <<
 				" }";
 		min_rwf_version_.store (client_rwf_version);
 	}
 	else if (min_rwf_version_ > client_rwf_version)
 	{
 		LOG(INFO) << "Degrading RWF: { "
-				  "\"MajorVersion\": " << static_cast<unsigned> (client->GetRwfMajorVersion()) <<
-				", \"MinorVersion\": " << static_cast<unsigned> (client->GetRwfMinorVersion()) <<
+				  "\"MajorVersion\": " << static_cast<unsigned> (client->rwf_major_version()) <<
+				", \"MinorVersion\": " << static_cast<unsigned> (client->rwf_minor_version()) <<
 				" }";
 		min_rwf_version_.store (client_rwf_version);
 	}
@@ -886,25 +852,6 @@ hitsuji::provider_t::AcceptClientSession (
 	cumulative_stats_[PROVIDER_PC_CLIENT_SESSION_ACCEPTED]++;
 	return true;
 }
-
-#if 0
-bool
-hitsuji::provider_t::EraseClientSession (
-	rfa::common::Handle*const handle
-	)
-{
-/* unregister RFA client session. */
-	omm_provider_->unregisterClient (handle);
-/* remove client from directory. */
-	boost::upgrade_lock<boost::shared_mutex> lock (clients_lock_);
-	auto it = clients_.find (handle);
-	if (clients_.end() == it)
-		return false;
-	boost::upgrade_to_unique_lock<boost::shared_mutex> uniqueLock (lock);
-	clients_.erase (it);
-	return true;
-}
-#endif
 
 /* 7.3.5.5 Making Request for Service Directory
  * By default, information about all available services is returned. If an
@@ -958,7 +905,7 @@ hitsuji::provider_t::GetDirectoryMap (
 		return false;
 	}
 	map_entry.action     = map_action;
-	const uint64_t service_id = GetServiceId();
+	const uint64_t service_id = this->service_id();
 	if (0 == service_id) {
 		cumulative_stats_[PROVIDER_PC_DIRECTORY_MAP_EXCEPTION]++;
 		LOG(ERROR) << "Service ID undefined for this provider, cannot generate directory map.";

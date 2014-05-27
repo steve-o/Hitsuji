@@ -1,7 +1,5 @@
 /* UPA interactive fake snapshot provider.  Fake snapshots are convenient for
  * consumption in TR products such as Eikon, DataView, RsslSinkApp.
- * Surprisingly non-streaming requests in RIS are implemented as fake
- * snapshots.
  */
 
 #include "hitsuji.hh"

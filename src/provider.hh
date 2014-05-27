@@ -77,42 +77,6 @@ namespace hitsuji
 	};
 
 	class client_t;
-	class item_stream_t;
-
-	class request_t : boost::noncopyable
-	{
-	public:
-		request_t (std::shared_ptr<item_stream_t> item_stream_, std::shared_ptr<client_t> client_, bool use_attribinfo_in_updates_)
-			: item_stream (item_stream_),
-			  client (client_),
-			  use_attribinfo_in_updates (use_attribinfo_in_updates_),
-			  has_initial_image (false)
-		{
-		}
-
-		std::weak_ptr<item_stream_t> item_stream;
-		std::weak_ptr<client_t> client;
-		const bool use_attribinfo_in_updates;	/* can theoretically change in reissue */
-/* RFA will return a CmdError message if the provider application submits data
- * before receiving a login success message.  Mute downstream publishing until
- * permission is granted to submit data.
- */
-		boost::atomic_bool has_initial_image;
-	};
-
-	class item_stream_t : boost::noncopyable
-	{
-	public:
-		item_stream_t ()
-		{
-		}
-
-/* Fixed name for this stream. */
-//		rfa::common::RFA_String rfa_name;
-/* Request tokens for clients, can be more than one per client. */
-//		std::unordered_map<rfa::sessionLayer::RequestToken*const, std::shared_ptr<request_t>> requests;
-		boost::shared_mutex lock;
-	};
 
 	class provider_t :
 		public std::enable_shared_from_this<provider_t>,
@@ -129,13 +93,13 @@ namespace hitsuji
 		void Quit();
 		void Close();
 
-		uint16_t GetRwfVersion() const {
+		uint16_t rwf_version() const {
 			return min_rwf_version_.load();
 		}
-		const char* GetServiceName() const {
+		const char* service_name() const {
 			return config_.service_name.c_str();
 		}
-		uint16_t GetServiceId() const {
+		uint16_t service_id() const {
 			return service_id_;
 		}
 
@@ -155,7 +119,6 @@ namespace hitsuji
 		void OnActiveClientSession (RsslChannel* handle);
 		void RejectClientSession (RsslChannel* handle, const char* address);
 		bool AcceptClientSession (RsslChannel* handle, const char* address);
-//		bool EraseClientSession (rfa::common::Handle*const handle);
 
 		void OnActiveState (RsslChannel* handle);
 		void OnMsg (RsslChannel* handle, RsslBuffer* buf);
@@ -168,9 +131,6 @@ namespace hitsuji
 		bool GetServiceDictionaries (RsslEncodeIterator*const it);
 		bool GetServiceQoS (RsslEncodeIterator*const it);
 		bool GetServiceState (RsslEncodeIterator*const it);
-
-		bool AddRequest (int32_t token, std::shared_ptr<client_t> client);
-		bool RemoveRequest (int32_t token);
 
 		int Submit (RsslChannel* c, RsslBuffer* buf);
 		int Ping (RsslChannel* c);
@@ -192,32 +152,24 @@ namespace hitsuji
 		fd_set out_rfds_, out_wfds_, out_efds_;
 		struct timeval in_tv_, out_tv_;
 
-/* UPA connection directory */
+/* RSSL connection directory */
 		std::list<RsslChannel*const> connections_;
 
-/* UPA Client Session directory */
+/* RSSL Client Session directory */
 		std::unordered_map<RsslChannel*const, std::shared_ptr<client_t>> clients_;
 		boost::shared_mutex clients_lock_;
 
 		friend client_t;
-
-/* Entire request set */
-		std::unordered_map<int32_t, std::weak_ptr<client_t>> requests_;
-		boost::shared_mutex requests_lock_;
 
 /* Reuters Wire Format versions. */
 		boost::atomic_uint16_t min_rwf_version_;
 
 /* Directory mapped ServiceID */
 		boost::atomic_uint16_t service_id_;
-/* RFA can reject new client requests whilst maintaining current connected sessions.
+/* TREP-RT can reject new client requests whilst maintaining current connected sessions.
  */
 		bool is_accepting_connections_;
 		bool is_accepting_requests_;
-
-/* Container of all item streams keyed by symbol name. */
-		std::unordered_map<std::string, std::shared_ptr<item_stream_t>> directory_;
-		boost::shared_mutex directory_lock_;
 
 /** Performance Counters **/
 		boost::posix_time::ptime creation_time_, last_activity_;

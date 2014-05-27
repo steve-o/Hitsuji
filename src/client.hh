@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <memory>
 #include <unordered_map>
+#include <unordered_set>
 
 /* Boost Posix Time */
 #include <boost/date_time/posix_time/posix_time.hpp>
@@ -55,7 +56,6 @@ namespace hitsuji
 		CLIENT_PC_ITEM_STREAMING_REQUEST_RECEIVED,
 		CLIENT_PC_ITEM_REISSUE_REQUEST_RECEIVED,
 		CLIENT_PC_ITEM_SNAPSHOT_REQUEST_RECEIVED,
-		CLIENT_PC_ITEM_DUPLICATE_SNAPSHOT,
 		CLIENT_PC_ITEM_REQUEST_REJECTED,
 		CLIENT_PC_ITEM_VALIDATED,
 		CLIENT_PC_ITEM_MALFORMED,
@@ -72,7 +72,17 @@ namespace hitsuji
 	};
 
 	class provider_t;
-	class item_stream_t;
+
+	struct request_t :
+		boost::noncopyable
+	{
+		request_t (uint8_t stream_state_)
+			: stream_state (stream_state_)
+		{
+		}
+
+		const uint8_t stream_state;
+	};
 
 	class client_t :
 		public std::enable_shared_from_this<client_t>,
@@ -86,14 +96,17 @@ namespace hitsuji
 		bool Close();
 
 /* RSSL client socket */
-		RsslChannel*const GetHandle() const {
+		RsslChannel*const handle() const {
 			return handle_;
 		}
-		uint8_t GetRwfMajorVersion() const {
+		uint8_t rwf_major_version() const {
 			return handle_->majorVersion;
 		}
-		uint8_t GetRwfMinorVersion() const {
+		uint8_t rwf_minor_version() const {
 			return handle_->minorVersion;
+		}
+		uint16_t rwf_version() const {
+			return (rwf_major_version() * 256) + rwf_minor_version();
 		}
 
 	private:
@@ -104,8 +117,6 @@ namespace hitsuji
 		bool OnDirectoryRequest (const RsslRequestMsg* msg);
 		bool OnDictionaryRequest (const RsslRequestMsg* msg);
 		bool OnItemRequest (const RsslRequestMsg* msg);
-		bool OnItemSnapshotRequest (const RsslRequestMsg* msg, int32_t token);
-		bool OnItemStreamingRequest (const RsslRequestMsg* msg, int32_t token);
 
 		bool OnCloseMsg (const RsslCloseMsg* msg);
 		bool OnItemClose (const RsslCloseMsg* msg);
@@ -114,8 +125,7 @@ namespace hitsuji
 		bool AcceptLogin (const RsslRequestMsg* msg, int32_t login_token);
 
 		bool SendDirectoryResponse (int32_t token, const char* service_name, uint32_t filter_mask);
-		bool SendClose (int32_t token, uint16_t service_id, uint8_t model_type, const char* name, size_t name_len, bool use_attribinfo_in_updates, uint8_t status_code, const char* text, size_t text_len);
-		bool SendInitial (uint16_t service_id, int32_t token, const char* name, size_t name_len, const boost::posix_time::ptime& timestamp);
+		bool SendClose (int32_t token, uint16_t service_id, uint8_t model_type, const char* name, size_t name_len, bool use_attribinfo_in_updates, uint8_t status_code, const std::string& status_text);
 		int Submit (RsslBuffer* buf);
 
 		const boost::posix_time::ptime& NextPing() const {
@@ -155,7 +165,7 @@ namespace hitsuji
 		unsigned pending_count_;
 
 /* Watchlist of all items. */
-//		std::unordered_map<rfa::sessionLayer::RequestToken*const, std::weak_ptr<item_stream_t>> items_;
+		std::unordered_map<int32_t, std::shared_ptr<request_t>> tokens_;
 
 /* Pre-allocated parsing state for requested items. */
 		std::string url_, value_;

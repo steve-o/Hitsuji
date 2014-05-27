@@ -248,6 +248,7 @@ set(cxx-sources
 	src/provider.cc
 	src/upa.cc
 	src/upaostream.cc
+	src/vta_test.cc
 	src/chrome/common/json_schema_constants.cc
 	src/chrome/common/json_schema_validator.cc
 	src/chromium/chromium_switches.cc

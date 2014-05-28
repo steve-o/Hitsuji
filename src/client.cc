@@ -839,6 +839,13 @@ hitsuji::client_t::OnItemRequest (
 		tokens_.erase (token_ret.first);
 		return rc;
 	} else {
+/* 12.1.3.1 Stream Comparison
+ * ADS enforces efficient usage of a client connection's bandwidth.  Streams
+ * must be combined when possible.  Two streams are identical when all
+ * identifying aspects match - that is the two streams have the same domainType,
+ * provided QoS, and all msgKey members. When these message members match, a new
+ * stream should not be established, rather the existing stream and streamId * should be leveraged to consume or provide this content.
+ */
 		cumulative_stats_[CLIENT_PC_ITEM_REISSUE_REQUEST_RECEIVED]++;
 		return SendRefresh (request_token, service_id, item_name);
 	}

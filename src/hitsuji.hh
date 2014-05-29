@@ -12,15 +12,13 @@
 /* Boost Atomics */
 #include <boost/atomic.hpp>
 
-/* Boost noncopyable base class */
-#include <boost/utility.hpp>
-
 /* Boost threading */
 #include <boost/thread.hpp>
 
 /* Velocity Analytics Plugin Framework */
 #include <vpf/vpf.h>
 
+#include "client.hh"
 #include "config.hh"
 
 namespace hitsuji
@@ -37,10 +35,10 @@ namespace hitsuji
 /* Tcl API interface. */
 		, public vpf::Command
 #endif
-		, boost::noncopyable
+		, public client_t::Delegate
 	{
 	public:
-		hitsuji_t();
+		explicit hitsuji_t();
 		virtual ~hitsuji_t();
 
 #ifndef CONFIG_AS_APPLICATION
@@ -58,6 +56,7 @@ namespace hitsuji
 /* Quit an earlier call to Run(). */
 		void Quit();
 #endif
+		virtual bool OnRequest (std::weak_ptr<client_t> client, uint16_t rwf_version, int32_t token, uint16_t service_id, const std::string& item_name, bool use_attribinfo_in_updates) override;
 
 		bool Initialize();
 		void Reset();

@@ -12,7 +12,7 @@ namespace vta
 	{
 		typedef intraday_t super;
 	public:
-		test_t (const std::string& prefix, uint16_t rwf_version, int32_t token, uint16_t service_id, const std::string& item_name);
+		test_t (uint16_t rwf_version, int32_t token, uint16_t service_id, const std::string& item_name);
 		~test_t();
 
 		virtual bool Calculate (const char* symbol_name) override;

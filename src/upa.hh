@@ -6,19 +6,15 @@
 
 #include <memory>
 
-/* Boost noncopyable base class */
-#include <boost/utility.hpp>
-
 #include "chromium/debug/leak_tracker.hh"
 #include "config.hh"
 
 namespace hitsuji
 {
-	class upa_t :
-		boost::noncopyable
+	class upa_t
 	{
 	public:
-		upa_t (const config_t& config);
+		explicit upa_t (const config_t& config);
 		~upa_t();
 
 		bool Initialize();

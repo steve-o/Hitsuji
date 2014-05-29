@@ -18,12 +18,14 @@ static const std::string kEnumTypeDictionaryName ("RWFEnum");
 
 hitsuji::provider_t::provider_t (
 	const hitsuji::config_t& config,
-	std::shared_ptr<hitsuji::upa_t> upa
+	std::shared_ptr<hitsuji::upa_t> upa,
+	hitsuji::client_t::Delegate* delegate 
 	) :
 	creation_time_ (boost::posix_time::second_clock::universal_time()),
 	last_activity_ (creation_time_),
 	config_ (config),
 	upa_ (upa),
+	delegate_ (delegate),
 	rssl_sock_ (nullptr),
 	keep_running_ (true),
 	min_rwf_version_ (0),
@@ -818,7 +820,7 @@ hitsuji::provider_t::AcceptClientSession (
 {
 	VLOG(2) << "Accepting new client session request: { \"Address\": \"" << address << "\" }";
 
-	auto client = std::make_shared<client_t> (shared_from_this(), handle, address);
+	auto client = std::make_shared<client_t> (shared_from_this(), delegate_, handle, address);
 	if (!(bool)client || !client->Initialize()) {
 		cumulative_stats_[PROVIDER_PC_CLIENT_INIT_EXCEPTION]++;
 		LOG(ERROR) << "Client session initialisation failed, aborting connection.";

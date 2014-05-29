@@ -180,7 +180,7 @@ public:
 	virtual void* newInstance (const char* type) override
 	{
 		assert (0 == strcmp (kPluginType, type));
-		return reinterpret_cast<vpf::AbstractUserPlugin*> (new hitsuji::hitsuji_t());
+		return static_cast<vpf::AbstractUserPlugin*> (new hitsuji::hitsuji_t());
 	}
 };
 

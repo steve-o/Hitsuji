@@ -12,9 +12,6 @@
 /* Boost Posix Time */
 #include <boost/date_time/posix_time/posix_time.hpp>
 
-/* Boost noncopyable base class */
-#include <boost/utility.hpp>
-
 /* UPA 7.4 */
 #include <upa/upa.h>
 
@@ -74,27 +71,31 @@ namespace hitsuji
 
 	class provider_t;
 
-	struct request_t :
-		boost::noncopyable
-	{
-		request_t (uint8_t stream_state_)
-			: stream_state (stream_state_)
-		{
-		}
-
-		const uint8_t stream_state;
-	};
-
 	class client_t :
-		public std::enable_shared_from_this<client_t>,
-		boost::noncopyable
+		public std::enable_shared_from_this<client_t>
 	{
 	public:
-		client_t (std::shared_ptr<provider_t> provider, RsslChannel* handle, const char* address);
+/* Delegate handles specific behaviour of an item request. */
+		class Delegate {
+		public:
+		    Delegate() {}
+
+		    virtual bool OnRequest (std::weak_ptr<client_t> client, uint16_t rwf_version, int32_t token, uint16_t service_id, const std::string& item_name, bool use_attribinfo_in_updates) = 0;
+/* TBD */
+//		    virtual bool OnCancel (std::weak_ptr<client_t> client, uint16_t rwf_version, int32_t token, uint16_t service_id, const std::string& item_name, bool use_attribinfo_in_updates) = 0;
+
+		protected:
+		    virtual ~Delegate() {}
+		};
+
+		explicit client_t (std::shared_ptr<provider_t> provider, Delegate* delegate, RsslChannel* handle, const char* address);
 		~client_t();
 
 		bool Initialize();
 		bool Close();
+
+		bool Reply (const void* data, size_t length, int32_t token);
+		bool ReplyWithClose (int32_t token, uint16_t service_id, uint8_t model_type, const char* name, size_t name_len, bool use_attribinfo_in_updates, uint8_t stream_state, uint8_t status_code, const std::string& status_text);
 
 /* RSSL client socket */
 		RsslChannel*const handle() const {
@@ -152,6 +153,7 @@ namespace hitsuji
 		}
 
 		std::shared_ptr<provider_t> provider_;
+		Delegate* delegate_;
 
 /* unique id per connection for trace. */
 		std::string prefix_;
@@ -166,14 +168,7 @@ namespace hitsuji
 		unsigned pending_count_;
 
 /* Watchlist of all items. */
-		std::unordered_map<int32_t, std::shared_ptr<request_t>> tokens_;
-
-/* Pre-allocated parsing state for requested items. */
-		url_parse::Parsed parsed_;
-		url_parse::Component file_name_;
-		std::string url_, value_;
-		std::string underlying_symbol_;
-		std::istringstream iss_;
+		std::unordered_set<int32_t> tokens_;
 
 /* Item requests may appear before login success has been granted. */
 		bool is_logged_in_;

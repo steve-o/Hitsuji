@@ -13,9 +13,6 @@
 #include "upaostream.hh"
 #include "provider.hh"
 
-#include "vta_bar.hh"
-#include "vta_test.hh"
-
 /* Maximum encoded size of an RSSL provider to client message. */
 #define MAX_MSG_SIZE 4096
 
@@ -25,20 +22,17 @@ static const std::string kErrorUnsupportedRequest = "Unsupported domain type in 
 static const std::string kErrorUnsupportedDictionary = "Unsupported dictionary request.";
 static const std::string kErrorUnsupportedNonStreaming = "Unsupported non-streaming request.";
 static const std::string kErrorLoginRequired = "Login required for request.";
-static const std::string kErrorDuplicateStream = "Item was reopened under new stream.";
-static const std::string kErrorCrossStreams = "Non-streaming reissue on streaming request.";
-static const std::string kErrorMalformedRequest = "Malformed request.";
-static const std::string kErrorNotFound = "Not found in SearchEngine.";
-static const std::string kErrorInternal = "Internal error.";
 
 hitsuji::client_t::client_t (
 	std::shared_ptr<hitsuji::provider_t> provider,
+	Delegate* delegate, 
 	RsslChannel* handle,
 	const char* address
 	) :
 	creation_time_ (boost::posix_time::second_clock::universal_time()),
 	last_activity_ (creation_time_),
 	provider_ (provider),
+	delegate_ (delegate),
 	address_ (address),
 	handle_ (handle),
 	pending_count_ (0),
@@ -789,22 +783,23 @@ hitsuji::client_t::OnItemRequest (
 /* Filtered before entry. */
 	CHECK(RSSL_DMT_MARKET_PRICE == model_type);
 
-/* decompose request */
-	url_.assign ("null://localhost/");
-	url_.append (item_name);
-	url_parse::ParseStandardURL (url_.c_str(), static_cast<int>(url_.size()), &parsed_);
-	if (parsed_.path.is_valid())
-		url_parse::ExtractFileName (url_.c_str(), parsed_.path, &file_name_);
-	if (!file_name_.is_valid()) {
-		cumulative_stats_[CLIENT_PC_ITEM_REQUEST_REJECTED]++;
-		cumulative_stats_[CLIENT_PC_ITEM_REQUEST_MALFORMED]++;
-		LOG(INFO) << prefix_ << "Closing invalid request for \"" << item_name << "\"";
-		return SendClose (request_token, service_id, model_type, item_name.c_str(), item_name.size(), use_attribinfo_in_updates,
-					RSSL_STREAM_CLOSED, RSSL_SC_NOT_FOUND, kErrorMalformedRequest);
-	}
-/* require a NULL terminated string */
-	underlying_symbol_.assign (url_.c_str() + file_name_.begin, file_name_.len);
-
+/* Elektron and IDN snapshot response:
+ * tIBM.N
+ * DOMAIN: RSSL_DMT_MARKET_PRICE
+ * State: Non-streaming/Ok/None - text: "All is well"
+ *
+ * Elektron subscription response:
+ * tIBM.N
+ * DOMAIN: RSSL_DMT_MARKET_PRICE
+ * State: Non-streaming/Ok/None - text: "All is well"
+ *
+ * IDN subscription responses:
+ * tIBM.N
+ * DOMAIN: RSSL_DMT_MARKET_PRICE
+ * State: Open/Ok/None - text: "All is well"
+ * Received Item StatusMsg for stream 6
+ *       State: Non-streaming/Suspect/Non-updating item - text: "Non-updating item"
+ */
 	const bool is_streaming_request = (RSSL_RQMF_STREAMING == (request_msg->flags & RSSL_RQMF_STREAMING));
 	const uint8_t stream_state = is_streaming_request ? RSSL_STREAM_OPEN : RSSL_STREAM_NON_STREAMING;
 	if (is_streaming_request) {
@@ -812,46 +807,31 @@ hitsuji::client_t::OnItemRequest (
 	} else {
 		cumulative_stats_[CLIENT_PC_ITEM_SNAPSHOT_REQUEST_RECEIVED]++;
 	}
-#ifndef CONFIG_AS_APPLICATION
-/* Check SearchEngine.exe inventory */
-	if (0 == TBPrimitives::IsSymbolExists (underlying_symbol_.c_str())) {
-		cumulative_stats_[CLIENT_PC_ITEM_NOT_FOUND]++;
-		cumulative_stats_[CLIENT_PC_ITEM_REQUEST_REJECTED]++;
-		LOG(INFO) << prefix_ << "Closing request for unknown item \"" << underlying_symbol_ << "\".";
-		return SendClose (request_token, service_id, model_type, item_name.c_str(), item_name.size(), use_attribinfo_in_updates,
-					RSSL_STREAM_CLOSED, RSSL_SC_NOT_FOUND, kErrorNotFound);
-	}
-#endif
-	vta::bar_t vta (prefix_, rwf_version(), request_token, service_id, item_name);
-	if (!vta.Calculate (underlying_symbol_.c_str())) {
-		return SendClose (request_token, service_id, model_type, item_name.c_str(), item_name.size(), use_attribinfo_in_updates,
-					RSSL_STREAM_CLOSED_RECOVER, RSSL_SC_ERROR, kErrorInternal);
-	}
-#if 0
 	const auto it = tokens_.find (request_token);
-	if (it == tokens_.end()) {
-		auto request = std::make_shared<request_t> (stream_state);
-		auto token_ret = tokens_.emplace (std::make_pair (request_token, request));
-/* 2.8.1. Snapshot and Streaming Requests
- * A provider may also set the streamState to RSSL_STREAM_NON_STREAMING if it does not allow streaming of the 
- * requested item.  */
-		bool rc = SendRefresh (request_token, service_id, item_name);
-		tokens_.erase (token_ret.first);
-		return rc;
-	} else {
-/* 12.1.3.1 Stream Comparison
- * ADS enforces efficient usage of a client connection's bandwidth.  Streams
- * must be combined when possible.  Two streams are identical when all
- * identifying aspects match - that is the two streams have the same domainType,
- * provided QoS, and all msgKey members. When these message members match, a new
- * stream should not be established, rather the existing stream and streamId * should be leveraged to consume or provide this content.
- */
+	if (it != tokens_.end()) {
 		cumulative_stats_[CLIENT_PC_ITEM_REISSUE_REQUEST_RECEIVED]++;
-		return SendRefresh (request_token, service_id, item_name);
+/* Explicitly ignore reissue as it does not alter response data. */
+		return true;
+	} else {
+		tokens_.emplace (request_token);
 	}
-#else
+	return delegate_->OnRequest (shared_from_this(), rwf_version(), request_token, service_id, item_name, use_attribinfo_in_updates);
+}
+
+bool
+hitsuji::client_t::Reply (
+	const void* data,
+	size_t length,
+	int32_t request_token
+	)
+{
 	RsslBuffer* buf;
 	RsslError rssl_err;
+	DCHECK(length <= MAX_MSG_SIZE);
+/* Drop response if token already canceled */
+	if (0 == tokens_.erase (request_token))
+		return true;
+/* Copy into RSSL channel buffer pool */
 	buf = rsslGetBuffer (handle_, MAX_MSG_SIZE, RSSL_FALSE /* not packed */, &rssl_err);
 	if (nullptr == buf) {
 		LOG(ERROR) << prefix_ << "rsslGetBuffer: { "
@@ -863,11 +843,7 @@ hitsuji::client_t::OnItemRequest (
 			" }";
 		return false;
 	}
-/* temporary to work around rtrUInt32 <-> size_t */
-	size_t length = buf->length;
-	if (!vta.WriteRaw (buf->data, &length)) {
-		goto cleanup;
-	}
+	CopyMemory (buf->data, data, length);
 	buf->length = static_cast<uint32_t> (length);
 	if (!Submit (buf)) {
 		goto cleanup;
@@ -883,7 +859,25 @@ cleanup:
 			" }";
 	}
 	return false;
-#endif
+}
+
+bool
+hitsuji::client_t::ReplyWithClose (
+	int32_t request_token,
+	uint16_t service_id,
+	uint8_t model_type,
+	const char* name,
+	size_t name_len,
+	bool use_attribinfo_in_updates,
+	uint8_t stream_state,
+	uint8_t status_code,
+	const std::string& status_text
+	)
+{
+/* Drop response if token already canceled */
+	if (0 == tokens_.erase (request_token))
+		return true;
+	return SendClose (request_token, service_id, model_type, name, name_len, use_attribinfo_in_updates, stream_state, status_code, status_text);
 }
 
 bool

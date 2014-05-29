@@ -24,14 +24,15 @@ static const int kRdmActivityTime1Id		= 1010;
 static const int kRdmActivityDate1Id		= 875;
 
 vta::test_t::test_t (
-	const std::string& prefix,
 	uint16_t rwf_version,
 	int32_t token, 
 	uint16_t service_id,
 	const std::string& item_name
 	)
-	: super (prefix, rwf_version, token, service_id, item_name)
+	: super (rwf_version, token, service_id, item_name)
 {
+/* Validation success. */
+	set_has_valid_request();
 }
 
 vta::test_t::~test_t()
@@ -51,8 +52,7 @@ vta::test_t::Calculate (
 	const char* symbol_name
 	)
 {
-/* State now represents valid data. */
-	set();
+/* nop */
 	return true;
 }
 
@@ -67,7 +67,7 @@ vta::test_t::Calculate(
 	FlexRecViewElement* view_element
 	)
 {
-	set();
+/* nop */
 	return true;
 }
 
@@ -427,7 +427,7 @@ vta::test_t::WriteRaw (
 void
 vta::test_t::Reset()
 {
-	clear();
+	clear_has_valid_request();
 }
 
 /* eof */

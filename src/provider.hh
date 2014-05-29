@@ -18,9 +18,6 @@
 /* Boost Posix Time */
 #include <boost/date_time/posix_time/posix_time.hpp>
 
-/* Boost noncopyable base class */
-#include <boost/utility.hpp>
-
 /* Boost threading. */
 #include <boost/thread.hpp>
 
@@ -29,6 +26,7 @@
 
 #include "chromium/debug/leak_tracker.hh"
 #include "upa.hh"
+#include "client.hh"
 #include "config.hh"
 #include "deleter.hh"
 
@@ -79,11 +77,10 @@ namespace hitsuji
 	class client_t;
 
 	class provider_t :
-		public std::enable_shared_from_this<provider_t>,
-		boost::noncopyable
+		public std::enable_shared_from_this<provider_t>
 	{
 	public:
-		provider_t (const config_t& config, std::shared_ptr<upa_t> upa);
+		explicit provider_t (const config_t& config, std::shared_ptr<upa_t> upa, client_t::Delegate* delegate);
 		~provider_t();
 
 		bool Initialize();
@@ -159,6 +156,7 @@ namespace hitsuji
 		std::unordered_map<RsslChannel*const, std::shared_ptr<client_t>> clients_;
 		boost::shared_mutex clients_lock_;
 
+		client_t::Delegate* delegate_;
 		friend client_t;
 
 /* Reuters Wire Format versions. */

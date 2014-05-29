@@ -7,8 +7,6 @@
 #include <FlexRecReader.h>
 
 #include "chromium/logging.hh"
-#include "chromium/string_piece.hh"
-#include "googleurl/url_parse.h"
 #include "upaostream.hh"
 #include "unix_epoch.hh"
 #include "rounding.hh"
@@ -50,45 +48,61 @@ static const boost::accumulators::accumulator_set<uint64_t,
 
 
 vta::bar_t::bar_t (
-	const std::string& prefix,
 	uint16_t rwf_version,
 	int32_t token, 
 	uint16_t service_id,
 	const std::string& item_name
 	)
-	: super (prefix, rwf_version, token, service_id, item_name)
+	: super (rwf_version, token, service_id, item_name)
 {
-	url_parse::Parsed parsed;
-	std::string url, value;
-	std::istringstream iss;
 /* decompose request */
-	url.assign ("null://localhost/");
-	url.append (item_name);
-	url_parse::ParseStandardURL (url.c_str(), static_cast<int>(url.size()), &parsed);
-	DCHECK(parsed.path.is_valid());
+	url_.assign ("null://localhost/");
+	url_.append (item_name);
+	url_parse::ParseStandardURL (url_.c_str(), static_cast<int>(url_.size()), &parsed_);
+	if (parsed_.path.is_valid())
+		url_parse::ExtractFileName (url_.c_str(), parsed_.path, &file_name_);
+	if (!file_name_.is_valid()) {
+//		cumulative_stats_[CLIENT_PC_ITEM_REQUEST_REJECTED]++;
+//		cumulative_stats_[CLIENT_PC_ITEM_REQUEST_MALFORMED]++;
+//		LOG(INFO) << prefix_ << "Closing invalid request for \"" << item_name << "\"";
+		return;
+	}
+/* require a NULL terminated string */
+	underlying_symbol_.assign (url_.c_str() + file_name_.begin, file_name_.len);
+#ifndef CONFIG_AS_APPLICATION
+/* Check SearchEngine.exe inventory */
+	if (0 == TBPrimitives::IsSymbolExists (underlying_symbol_.c_str())) {
+//		cumulative_stats_[CLIENT_PC_ITEM_NOT_FOUND]++;
+//		cumulative_stats_[CLIENT_PC_ITEM_REQUEST_REJECTED]++;
+//		LOG(INFO) << prefix_ << "Closing request for unknown item \"" << underlying_symbol_ << "\".";
+		return;
+	}
+#endif
 	using namespace boost::gregorian;
     	using namespace boost::posix_time;
-	if (parsed.query.is_valid()) {
-		url_parse::Component query = parsed.query;
+	if (parsed_.query.is_valid()) {
+		url_parse::Component query = parsed_.query;
 		url_parse::Component key_range, value_range;
 		ptime t;
 /* For each key-value pair, i.e. ?a=x&b=y&c=z -> (a,x) (b,y) (c,z) */
-		while (url_parse::ExtractQueryKeyValue (url.c_str(), &query, &key_range, &value_range))
+		while (url_parse::ExtractQueryKeyValue (url_.c_str(), &query, &key_range, &value_range))
 		{
 /* Lazy std::string conversion for key. */
-			const chromium::StringPiece key (url.c_str() + key_range.begin, key_range.len);
+			const chromium::StringPiece key (url_.c_str() + key_range.begin, key_range.len);
 /* Value must convert to add NULL terminator for conversion APIs. */
-			value.assign (url.c_str() + value_range.begin, value_range.len);
+			value_.assign (url_.c_str() + value_range.begin, value_range.len);
 			if (key == kOpenParameter) {
 /* Disabling exceptions in boost::posix_time::time_duration requires stringstream which requires a string to initialise. */
-				iss.str (value);
-				if (iss >> t) open_time_ = t;
+				iss_.str (value_);
+				if (iss_ >> t) open_time_ = t;
 			} else if (key == kCloseParameter) {
-				iss.str (value);
-				if (iss >> t) close_time_ = t;
+				iss_.str (value_);
+				if (iss_ >> t) close_time_ = t;
 			}
 		}
 	}
+/* Validation success. */
+	set_has_valid_request();
 }
 
 vta::bar_t::~bar_t()
@@ -108,6 +122,7 @@ vta::bar_t::Calculate (
 	const char* symbol_name
 	)
 {
+#ifndef CONFIG_AS_APPLICATION
 /* Symbol names */
 	std::set<std::string> symbol_set;
 	symbol_set.insert (symbol_name);
@@ -144,8 +159,7 @@ vta::bar_t::Calculate (
 	}
 /* Cleanup */
 	fr.Close();
-/* State now represents valid data. */
-	set();
+#endif /* CONFIG_AS_APPLICATION */
 	return true;
 }
 
@@ -160,6 +174,7 @@ vta::bar_t::Calculate(
 	FlexRecViewElement* view_element
 	)
 {
+#ifndef CONFIG_AS_APPLICATION
 /* Time period */
 	const __time32_t from = internal::to_unix_epoch (open_time());
 	const __time32_t till = internal::to_unix_epoch (close_time());
@@ -180,8 +195,7 @@ vta::bar_t::Calculate(
 		LOG(ERROR) << prefix_ << "FlexRecPrimitives::GetFlexRecords raised exception " << e.what();
 		return false;
 	}
-/* State now represents valid data. */
-	set();
+#endif /* CONFIG_AS_APPLICATION */
 	return true;
 }
 
@@ -490,7 +504,7 @@ vta::bar_t::Reset()
 {
 	last_price_ = kNullLastPrice;
 	tick_volume_ = kNullTickVolume;
-	clear();
+	clear_has_valid_request();
 }
 
 /* Apply a FlexRecord to a partial bar result.

@@ -15,6 +15,16 @@
 #include "upa.hh"
 #include "version.hh"
 
+#include "vta_bar.hh"
+#include "vta_test.hh"
+
+/* Maximum encoded size of an RSSL provider to client message. */
+#define MAX_MSG_SIZE 4096
+
+static const std::string kErrorMalformedRequest = "Malformed request.";
+static const std::string kErrorNotFound = "Not found in SearchEngine.";
+static const std::string kErrorInternal = "Internal error.";
+
 /* Global weak pointer to shutdown as application */
 static std::weak_ptr<hitsuji::hitsuji_t> g_application;
 
@@ -171,7 +181,7 @@ hitsuji::hitsuji_t::Initialize()
 		if (!(bool)upa_ || !upa_->Initialize())
 			goto cleanup;
 /* UPA provider */
-		provider_.reset (new provider_t (config_, upa_));
+		provider_.reset (new provider_t (config_, upa_, static_cast<client_t::Delegate*> (this)));
 		if (!(bool)provider_ || !provider_->Initialize())
 			goto cleanup;
 	} catch (const std::exception& e) {
@@ -185,6 +195,45 @@ cleanup:
 	Reset();
 	LOG(INFO) << "Initialisation failed.";
 	return false;
+}
+
+bool
+hitsuji::hitsuji_t::OnRequest (
+	std::weak_ptr<client_t> client,
+	uint16_t rwf_version, 
+	int32_t token,
+	uint16_t service_id,
+	const std::string& item_name,
+	bool use_attribinfo_in_updates
+	)
+{
+	vta::bar_t vta (rwf_version, token, service_id, item_name);
+/* Validate request, e.g. be satisifed with this SearchEngine instance */
+	if (!(bool)vta) {
+		auto sp = client.lock();
+		return sp->ReplyWithClose (token, service_id, RSSL_DMT_MARKET_PRICE, item_name.c_str(), item_name.size(), use_attribinfo_in_updates,
+					RSSL_STREAM_CLOSED, RSSL_SC_NOT_FOUND, kErrorMalformedRequest);
+	}
+/* Fake asynchronous operation */
+	if (!vta.Calculate (vta.underlying_symbol_.c_str())) {
+		if (auto sp = client.lock()) {
+			return sp->ReplyWithClose (token, service_id, RSSL_DMT_MARKET_PRICE, item_name.c_str(), item_name.size(), use_attribinfo_in_updates,
+						RSSL_STREAM_CLOSED_RECOVER, RSSL_SC_ERROR, kErrorInternal);
+		} else {
+			return false;
+		}
+	}
+	char buf[MAX_MSG_SIZE];
+	size_t length = sizeof (buf);
+	if (auto sp = client.lock()) {
+		if (!vta.WriteRaw (buf, &length)) {
+			return sp->ReplyWithClose (token, service_id, RSSL_DMT_MARKET_PRICE, item_name.c_str(), item_name.size(), use_attribinfo_in_updates,
+						RSSL_STREAM_CLOSED_RECOVER, RSSL_SC_ERROR, kErrorInternal);
+		}
+		return sp->Reply (buf, length, token);
+	} else {
+		return false;
+	}
 }
 
 bool

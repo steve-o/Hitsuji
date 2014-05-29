@@ -13,6 +13,8 @@
 /* Boost Posix Time */
 #include <boost/date_time/posix_time/posix_time.hpp>
 
+#include "chromium/string_piece.hh"
+#include "googleurl/url_parse.h"
 #include "vta.hh"
 #include "accumulators/first.hh"
 #include "accumulators/last.hh"
@@ -30,7 +32,7 @@ namespace vta
 	{
 		typedef intraday_t super;
 	public:
-		bar_t (const std::string& prefix, uint16_t rwf_version, int32_t token, uint16_t service_id, const std::string& item_name);
+		bar_t (uint16_t rwf_version, int32_t token, uint16_t service_id, const std::string& item_name);
 		~bar_t();
 
 		virtual bool Calculate (const char* symbol_name) override;
@@ -39,6 +41,13 @@ namespace vta
 		virtual void Reset() override;
 
 		static int OnFlexRecord(FRTreeCallbackInfo* info);
+
+/* Pre-allocated parsing state for requested items. */
+		url_parse::Parsed parsed_;
+		url_parse::Component file_name_;
+		std::string url_, value_;
+		std::string underlying_symbol_;
+		std::istringstream iss_;
 
 	private:
 		double open_price() const { return boost::accumulators::first (last_price_); }

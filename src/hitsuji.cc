@@ -39,6 +39,7 @@ hitsuji::hitsuji_t::hitsuji_t()
 	, shutting_down_ (false)
 /* Unique instance number, never decremented. */
 	, instance_ (instance_count_.fetch_add (1, boost::memory_order_relaxed))
+	, manager_ (nullptr)
 {	
 }
 
@@ -185,10 +186,27 @@ hitsuji::hitsuji_t::Initialize()
 		if (!(bool)provider_ || !provider_->Initialize())
 			goto cleanup;
 	} catch (const std::exception& e) {
-		LOG(ERROR) << "Initialisation exception: { "
-			"\"What\": \"" << e.what() << "\" }";
+		LOG(ERROR) << "Upa::Initialisation exception: { "
+			"\"What\": \"" << e.what() << "\""
+			" }";
 		goto cleanup;
 	}
+	try {
+/* FlexRecPrimitives cursor */
+		manager_ = FlexRecDefinitionManager::GetInstance (nullptr);
+		work_area_.reset (manager_->AcquireWorkArea(), [this](FlexRecWorkAreaElement* work_area){ manager_->ReleaseWorkArea (work_area); });
+		view_element_.reset (manager_->AcquireView(), [this](FlexRecViewElement* view_element){ manager_->ReleaseView (view_element); });
+		if (!manager_->GetView ("Trade", view_element_->view)) {
+			LOG(ERROR) << "FlexRecDefinitionManager::GetView failed.";
+			goto cleanup;
+		}
+	} catch (const std::exception& e) {
+		LOG(ERROR) << "FlexRecord::Initialisation exception: { "
+			"\"What\": \"" << e.what() << "\""
+			" }";
+		goto cleanup;
+	}
+
 	LOG(INFO) << "Initialisation complete.";
 	return true;
 cleanup:
@@ -215,7 +233,8 @@ hitsuji::hitsuji_t::OnRequest (
 					RSSL_STREAM_CLOSED, RSSL_SC_NOT_FOUND, kErrorMalformedRequest);
 	}
 /* Fake asynchronous operation */
-	if (!vta.Calculate (vta.underlying_symbol_.c_str())) {
+//	if (!vta.Calculate (vta.underlying_symbol().c_str())) {
+	if (!vta.Calculate (TBPrimitives::GetSymbolHandle (vta.underlying_symbol().c_str(), 1), work_area_.get(), view_element_.get())) {
 		if (auto sp = client.lock()) {
 			return sp->ReplyWithClose (token, service_id, RSSL_DMT_MARKET_PRICE, item_name.c_str(), item_name.size(), use_attribinfo_in_updates,
 						RSSL_STREAM_CLOSED_RECOVER, RSSL_SC_ERROR, kErrorInternal);

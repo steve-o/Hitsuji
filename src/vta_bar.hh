@@ -35,19 +35,15 @@ namespace vta
 		bar_t (uint16_t rwf_version, int32_t token, uint16_t service_id, const std::string& item_name);
 		~bar_t();
 
+		const std::string& underlying_symbol() const { return underlying_symbol_; }
+
 		virtual bool Calculate (const char* symbol_name) override;
 		virtual bool Calculate (const TBSymbolHandle& handle, FlexRecWorkAreaElement* work_area, FlexRecViewElement* view_element) override;
 		virtual bool WriteRaw (char* data, size_t* length);
 		virtual void Reset() override;
 
+/* FlexRecPrimitives callback */
 		static int OnFlexRecord(FRTreeCallbackInfo* info);
-
-/* Pre-allocated parsing state for requested items. */
-		url_parse::Parsed parsed_;
-		url_parse::Component file_name_;
-		std::string url_, value_;
-		std::string underlying_symbol_;
-		std::istringstream iss_;
 
 	private:
 		double open_price() const { return boost::accumulators::first (last_price_); }
@@ -59,7 +55,16 @@ namespace vta
 		const boost::posix_time::ptime& open_time() const { return open_time_; }
 		const boost::posix_time::ptime& close_time() const { return close_time_; }
 
+/* Pre-allocated parsing state for requested items. */
+		url_parse::Parsed parsed_;
+		url_parse::Component file_name_;
+		std::string url_, value_;
+		std::string underlying_symbol_;
+		std::istringstream iss_;
+
+/* Request parameters */
 		boost::posix_time::ptime open_time_, close_time_;
+/* Analytic state */
 		boost::accumulators::accumulator_set<double,
 			boost::accumulators::features<boost::accumulators::tag::first,
 						      boost::accumulators::tag::last,

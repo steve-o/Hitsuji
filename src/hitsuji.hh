@@ -93,7 +93,11 @@ namespace hitsuji
 /* UPA context. */
 		std::shared_ptr<upa_t> upa_;
 /* UPA provider */
-		std::shared_ptr<provider_t> provider_;	
+		std::shared_ptr<provider_t> provider_;
+/* FLexRecord cursor */
+		FlexRecDefinitionManager* manager_;
+		std::shared_ptr<FlexRecWorkAreaElement> work_area_;
+		std::shared_ptr<FlexRecViewElement> view_element_;
 	};
 
 } /* namespace hitsuji */

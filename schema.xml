@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<messageSchema package="hitsuji"
+               id="1"
+               semanticVersion="1.0"
+               description="I am not a message schema"
+               byteOrder="littleEndian">
+    <types>
+        <composite name="messageHeader" description="Message identifiers and length of message root">
+            <type name="blockLength" primitiveType="uint16"/>
+            <type name="templateId" primitiveType="uint16"/>
+            <type name="schemaId" primitiveType="uint16"/>
+            <type name="version" primitiveType="uint16"/>
+        </composite>
+        <composite name="varDataEncoding">
+            <type name="length" primitiveType="uint8"/>
+            <type name="varData" primitiveType="uint8" length="0" characterEncoding="UTF-8"/>
+        </composite>
+    </types>
+    <types>
+        <enum name="BooleanType" encodingType="uint8">
+            <validValue name="NO">0</validValue>
+            <validValue name="YES">1</validValue>
+        </enum>
+    </types>
+    <message name="Request" id="1" description="Rssl request to worker thread">
+        <field name="rwfVersion" id="1" type="uint16"/>
+        <field name="token" id="2" type="int32"/>
+        <field name="serviceId" id="3" type="uint16"/>
+        <field name="useAttribInfoInUpdates" id="4" type="BooleanType"/>
+        <data name="itemName" id="5" type="varDataEncoding"/>
+    </message>
+</messageSchema>

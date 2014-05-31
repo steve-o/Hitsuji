@@ -16,7 +16,6 @@
 #include <upa/upa.h>
 
 #include "chromium/debug/leak_tracker.hh"
-#include "googleurl/url_parse.h"
 #include "upa.hh"
 #include "config.hh"
 #include "deleter.hh"

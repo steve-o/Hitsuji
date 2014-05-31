@@ -24,19 +24,23 @@ static const int kRdmActivityTime1Id		= 1010;
 static const int kRdmActivityDate1Id		= 875;
 
 vta::test_t::test_t (
-	uint16_t rwf_version,
-	int32_t token, 
-	uint16_t service_id,
-	const std::string& item_name
+	const std::string& worker_name
 	)
-	: super (rwf_version, token, service_id, item_name)
+	: super (worker_name)
 {
-/* Validation success. */
-	set_has_valid_request();
 }
 
 vta::test_t::~test_t()
 {
+}
+
+bool
+vta::test_t::ParseRequest (
+	const std::string& url,
+	const url_parse::Component& parsed_query
+	)
+{
+	return true;
 }
 
 /* Calculate bar data with FlexRecord Cursor API.
@@ -73,6 +77,10 @@ vta::test_t::Calculate(
 
 bool
 vta::test_t::WriteRaw (
+	uint16_t rwf_version,
+	int32_t token,
+	uint16_t service_id,
+	const std::string& item_name,
 	char* data,
 	size_t* length
 	)
@@ -88,7 +96,7 @@ vta::test_t::WriteRaw (
 	RsslBuffer buf = { static_cast<uint32_t> (*length), data };
 	RsslRet rc;
 
-	DCHECK(!item_name().empty());
+	DCHECK(!item_name.empty());
 
 /* 7.4.8.3 Set the message model type of the response. */
 	response.msgBase.domainType = RSSL_DMT_MARKET_PRICE;
@@ -102,14 +110,14 @@ vta::test_t::WriteRaw (
 	response.msgBase.containerType = RSSL_DT_FIELD_LIST;
 
 /* 7.4.8.2 Create or re-use a request attribute object (4.2.4) */
-	response.msgBase.msgKey.serviceId   = service_id();
+	response.msgBase.msgKey.serviceId   = service_id;
 	response.msgBase.msgKey.nameType    = RDM_INSTRUMENT_NAME_TYPE_RIC;
-	response.msgBase.msgKey.name.data   = const_cast<char*> (item_name().c_str());
-	response.msgBase.msgKey.name.length = static_cast<uint32_t> (item_name().size());
+	response.msgBase.msgKey.name.data   = const_cast<char*> (item_name.c_str());
+	response.msgBase.msgKey.name.length = static_cast<uint32_t> (item_name.size());
 	response.msgBase.msgKey.flags = RSSL_MKF_HAS_SERVICE_ID | RSSL_MKF_HAS_NAME_TYPE | RSSL_MKF_HAS_NAME;
 	response.flags |= RSSL_RFMF_HAS_MSG_KEY;
 /* Set the request token. */
-	response.msgBase.streamId = token();
+	response.msgBase.streamId = token;
 
 /** Optional: but require to replace stale values in cache when stale values are supported. **/
 /* Item interaction state: Open, Closed, ClosedRecover, Redirected, NonStreaming, or Unspecified. */
@@ -128,14 +136,14 @@ vta::test_t::WriteRaw (
 			" }";
 		return false;
 	}
-	rc = rsslSetEncodeIteratorRWFVersion (&it, rwf_major_version(), rwf_major_version());
+	rc = rsslSetEncodeIteratorRWFVersion (&it, rwf_major_version (rwf_version), rwf_major_version (rwf_version));
 	if (RSSL_RET_SUCCESS != rc) {
 		LOG(ERROR) << prefix_ << "rsslSetEncodeIteratorRWFVersion: { "
 			  "\"returnCode\": " << static_cast<signed> (rc) << ""
 			", \"enumeration\": \"" << rsslRetCodeToString (rc) << "\""
 			", \"text\": \"" << rsslRetCodeInfo (rc) << "\""
-			", \"majorVersion\": " << static_cast<unsigned> (rwf_major_version()) << ""
-			", \"minorVersion\": " << static_cast<unsigned> (rwf_minor_version()) << ""
+			", \"majorVersion\": " << static_cast<unsigned> (rwf_major_version (rwf_version)) << ""
+			", \"minorVersion\": " << static_cast<unsigned> (rwf_minor_version (rwf_version)) << ""
 			" }";
 		return false;
 	}
@@ -427,7 +435,7 @@ vta::test_t::WriteRaw (
 void
 vta::test_t::Reset()
 {
-	clear_has_valid_request();
+/* nop */
 }
 
 /* eof */

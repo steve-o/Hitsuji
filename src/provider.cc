@@ -683,7 +683,7 @@ check_closed_state:
 			auto client = reinterpret_cast<client_t*> (c->userSpecPtr);
 			client->SetNextPong (last_activity_ + boost::posix_time::seconds (c->pingTimeout));
 		}
-		LOG(INFO) << "RSSL pong.";
+		DVLOG(1) << "RSSL pong.";
 		break;
 	case RSSL_RET_FAILURE:
 		cumulative_stats_[PROVIDER_PC_RSSL_READ_FAILURE]++;

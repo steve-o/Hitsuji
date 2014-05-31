@@ -751,7 +751,7 @@ hitsuji::client_t::OnItemRequest (
 {
 	DCHECK (nullptr != request_msg);
 	cumulative_stats_[CLIENT_PC_ITEM_REQUEST_RECEIVED]++;
-	LOG(INFO) << prefix_ << "ItemRequest:" << *request_msg;
+	VLOG(10) << prefix_ << "ItemRequest:" << *request_msg;
 
 /* 10.3.6 Handling Item Requests
  * - Ensure that the requesting session is logged in.

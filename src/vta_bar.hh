@@ -13,8 +13,6 @@
 /* Boost Posix Time */
 #include <boost/date_time/posix_time/posix_time.hpp>
 
-#include "chromium/string_piece.hh"
-#include "googleurl/url_parse.h"
 #include "vta.hh"
 #include "accumulators/first.hh"
 #include "accumulators/last.hh"
@@ -32,14 +30,13 @@ namespace vta
 	{
 		typedef intraday_t super;
 	public:
-		bar_t (uint16_t rwf_version, int32_t token, uint16_t service_id, const std::string& item_name);
+		bar_t (const std::string& worker_name);
 		~bar_t();
 
-		const std::string& underlying_symbol() const { return underlying_symbol_; }
-
+		virtual bool ParseRequest (const std::string& url, const url_parse::Component& parsed_query) override;
 		virtual bool Calculate (const char* symbol_name) override;
 		virtual bool Calculate (const TBSymbolHandle& handle, FlexRecWorkAreaElement* work_area, FlexRecViewElement* view_element) override;
-		virtual bool WriteRaw (char* data, size_t* length);
+		virtual bool WriteRaw (uint16_t rwf_version, int32_t token, uint16_t service_id, const std::string& item_name, char* data, size_t* length);
 		virtual void Reset() override;
 
 /* FlexRecPrimitives callback */
@@ -56,10 +53,7 @@ namespace vta
 		const boost::posix_time::ptime& close_time() const { return close_time_; }
 
 /* Pre-allocated parsing state for requested items. */
-		url_parse::Parsed parsed_;
-		url_parse::Component file_name_;
-		std::string url_, value_;
-		std::string underlying_symbol_;
+		std::string value_;
 		std::istringstream iss_;
 
 /* Request parameters */

@@ -18,8 +18,18 @@
 /* Velocity Analytics Plugin Framework */
 #include <vpf/vpf.h>
 
+#include "googleurl/url_parse.h"
 #include "client.hh"
 #include "config.hh"
+
+/* Maximum encoded size of an RSSL provider to client message. */
+#define MAX_MSG_SIZE 4096
+
+namespace vta
+{
+	class bar_t;
+	class test_t;
+}
 
 namespace hitsuji
 {
@@ -67,6 +77,8 @@ namespace hitsuji
 	private:
 /* Run core event loop. */
 		void MainLoop();
+/* Per thread workspace. */
+		bool AcquireFlexRecordCursor();
 
 /* Start the encapsulated provider instance until Stop is called.  Stop may be
  * called to pre-emptively prevent execution.
@@ -94,10 +106,20 @@ namespace hitsuji
 		std::shared_ptr<upa_t> upa_;
 /* UPA provider */
 		std::shared_ptr<provider_t> provider_;
-/* FLexRecord cursor */
+/* As worker state: */
+/* Parsing state for requested items. */
+		std::string url_;
+		std::string underlying_symbol_;
+/* FlexRecord cursor */
 		FlexRecDefinitionManager* manager_;
 		std::shared_ptr<FlexRecWorkAreaElement> work_area_;
 		std::shared_ptr<FlexRecViewElement> view_element_;
+/* Rssl message buffer */
+		char buf_[MAX_MSG_SIZE];
+		size_t buf_length_;
+/* Analytics*/
+		std::shared_ptr<vta::bar_t> vta_bar_;
+		std::shared_ptr<vta::test_t> vta_test_;
 	};
 
 } /* namespace hitsuji */

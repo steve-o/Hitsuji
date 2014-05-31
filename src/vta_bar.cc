@@ -7,6 +7,7 @@
 #include <FlexRecReader.h>
 
 #include "chromium/logging.hh"
+#include "chromium/string_piece.hh"
 #include "upaostream.hh"
 #include "unix_epoch.hh"
 #include "rounding.hh"
@@ -48,65 +49,41 @@ static const boost::accumulators::accumulator_set<uint64_t,
 
 
 vta::bar_t::bar_t (
-	uint16_t rwf_version,
-	int32_t token, 
-	uint16_t service_id,
-	const std::string& item_name
+	const std::string& worker_name
 	)
-	: super (rwf_version, token, service_id, item_name)
+	: super (worker_name)
 {
-/* decompose request */
-	url_.assign ("null://localhost/");
-	url_.append (item_name);
-	url_parse::ParseStandardURL (url_.c_str(), static_cast<int>(url_.size()), &parsed_);
-	if (parsed_.path.is_valid())
-		url_parse::ExtractFileName (url_.c_str(), parsed_.path, &file_name_);
-	if (!file_name_.is_valid()) {
-//		cumulative_stats_[CLIENT_PC_ITEM_REQUEST_REJECTED]++;
-//		cumulative_stats_[CLIENT_PC_ITEM_REQUEST_MALFORMED]++;
-//		LOG(INFO) << prefix_ << "Closing invalid request for \"" << item_name << "\"";
-		return;
-	}
-/* require a NULL terminated string */
-	underlying_symbol_.assign (url_.c_str() + file_name_.begin, file_name_.len);
-#ifndef CONFIG_AS_APPLICATION
-/* Check SearchEngine.exe inventory */
-	if (0 == TBPrimitives::IsSymbolExists (underlying_symbol_.c_str())) {
-//		cumulative_stats_[CLIENT_PC_ITEM_NOT_FOUND]++;
-//		cumulative_stats_[CLIENT_PC_ITEM_REQUEST_REJECTED]++;
-//		LOG(INFO) << prefix_ << "Closing request for unknown item \"" << underlying_symbol_ << "\".";
-		return;
-	}
-#endif
-	using namespace boost::gregorian;
-    	using namespace boost::posix_time;
-	if (parsed_.query.is_valid()) {
-		url_parse::Component query = parsed_.query;
-		url_parse::Component key_range, value_range;
-		ptime t;
-/* For each key-value pair, i.e. ?a=x&b=y&c=z -> (a,x) (b,y) (c,z) */
-		while (url_parse::ExtractQueryKeyValue (url_.c_str(), &query, &key_range, &value_range))
-		{
-/* Lazy std::string conversion for key. */
-			const chromium::StringPiece key (url_.c_str() + key_range.begin, key_range.len);
-/* Value must convert to add NULL terminator for conversion APIs. */
-			value_.assign (url_.c_str() + value_range.begin, value_range.len);
-			if (key == kOpenParameter) {
-/* Disabling exceptions in boost::posix_time::time_duration requires stringstream which requires a string to initialise. */
-				iss_.str (value_);
-				if (iss_ >> t) open_time_ = t;
-			} else if (key == kCloseParameter) {
-				iss_.str (value_);
-				if (iss_ >> t) close_time_ = t;
-			}
-		}
-	}
-/* Validation success. */
-	set_has_valid_request();
 }
 
 vta::bar_t::~bar_t()
 {
+}
+
+bool
+vta::bar_t::ParseRequest (
+	const std::string& url,
+	const url_parse::Component& parsed_query
+	)
+{
+	using namespace boost::gregorian;
+    	using namespace boost::posix_time;
+	url_parse::Component query = parsed_query;
+	url_parse::Component key_range, value_range;
+/* For each key-value pair, i.e. ?a=x&b=y&c=z -> (a,x) (b,y) (c,z) */
+	while (url_parse::ExtractQueryKeyValue (url.c_str(), &query, &key_range, &value_range))
+	{
+/* Lazy std::string conversion for key. */
+		const chromium::StringPiece key (url.c_str() + key_range.begin, key_range.len);
+/* Value must convert to add NULL terminator for conversion APIs. */
+		value_.assign (url.c_str() + value_range.begin, value_range.len);
+		if (key == kOpenParameter) {
+			open_time_ = from_time_t (std::atol (value_.c_str()));
+		} else if (key == kCloseParameter) {
+			close_time_ = from_time_t (std::atol (value_.c_str()));
+		}
+	}
+/* Validation success. */
+	return true;
 }
 
 /* Calculate bar data with FlexRecord Cursor API.
@@ -199,8 +176,36 @@ vta::bar_t::Calculate(
 	return true;
 }
 
+/* Apply a FlexRecord to a partial bar result.
+ *
+ * Returns <1> to continue processing, <2> to halt processing due to an error.
+ */
+int
+vta::bar_t::OnFlexRecord(
+	FRTreeCallbackInfo* info
+	)
+{
+	CHECK(nullptr != info->callersData);
+	auto& bar = *reinterpret_cast<bar_t*> (info->callersData);
+
+/* extract from view */
+	const double   last_price  = *reinterpret_cast<double*>   (info->theView[kFRLastPrice].data);
+	const uint64_t tick_volume = *reinterpret_cast<uint64_t*> (info->theView[kFRTickVolume].data);
+
+/* add to accumulators */
+	bar.last_price_  (last_price);
+	bar.tick_volume_ (tick_volume);
+
+/* continue processing */
+	return 1;
+}
+
 bool
 vta::bar_t::WriteRaw (
+	uint16_t rwf_version,
+	int32_t token,
+	uint16_t service_id,
+	const std::string& item_name,
 	char* data,
 	size_t* length
 	)
@@ -216,7 +221,7 @@ vta::bar_t::WriteRaw (
 	RsslBuffer buf = { static_cast<uint32_t> (*length), data };
 	RsslRet rc;
 
-	DCHECK(!item_name().empty());
+	DCHECK(!item_name.empty());
 
 /* 7.4.8.3 Set the message model type of the response. */
 	response.msgBase.domainType = RSSL_DMT_MARKET_PRICE;
@@ -230,14 +235,14 @@ vta::bar_t::WriteRaw (
 	response.msgBase.containerType = RSSL_DT_FIELD_LIST;
 
 /* 7.4.8.2 Create or re-use a request attribute object (4.2.4) */
-	response.msgBase.msgKey.serviceId   = service_id();
+	response.msgBase.msgKey.serviceId   = service_id;
 	response.msgBase.msgKey.nameType    = RDM_INSTRUMENT_NAME_TYPE_RIC;
-	response.msgBase.msgKey.name.data   = const_cast<char*> (item_name().c_str());
-	response.msgBase.msgKey.name.length = static_cast<uint32_t> (item_name().size());
+	response.msgBase.msgKey.name.data   = const_cast<char*> (item_name.c_str());
+	response.msgBase.msgKey.name.length = static_cast<uint32_t> (item_name.size());
 	response.msgBase.msgKey.flags = RSSL_MKF_HAS_SERVICE_ID | RSSL_MKF_HAS_NAME_TYPE | RSSL_MKF_HAS_NAME;
 	response.flags |= RSSL_RFMF_HAS_MSG_KEY;
 /* Set the request token. */
-	response.msgBase.streamId = token();
+	response.msgBase.streamId = token;
 
 /** Optional: but require to replace stale values in cache when stale values are supported. **/
 /* Item interaction state: Open, Closed, ClosedRecover, Redirected, NonStreaming, or Unspecified. */
@@ -256,14 +261,14 @@ vta::bar_t::WriteRaw (
 			" }";
 		return false;
 	}
-	rc = rsslSetEncodeIteratorRWFVersion (&it, rwf_major_version(), rwf_major_version());
+	rc = rsslSetEncodeIteratorRWFVersion (&it, rwf_major_version (rwf_version), rwf_major_version (rwf_version));
 	if (RSSL_RET_SUCCESS != rc) {
 		LOG(ERROR) << prefix_ << "rsslSetEncodeIteratorRWFVersion: { "
 			  "\"returnCode\": " << static_cast<signed> (rc) << ""
 			", \"enumeration\": \"" << rsslRetCodeToString (rc) << "\""
 			", \"text\": \"" << rsslRetCodeInfo (rc) << "\""
-			", \"majorVersion\": " << static_cast<unsigned> (rwf_major_version()) << ""
-			", \"minorVersion\": " << static_cast<unsigned> (rwf_minor_version()) << ""
+			", \"majorVersion\": " << static_cast<unsigned> (rwf_major_version (rwf_version)) << ""
+			", \"minorVersion\": " << static_cast<unsigned> (rwf_minor_version (rwf_version)) << ""
 			" }";
 		return false;
 	}
@@ -502,34 +507,9 @@ vta::bar_t::WriteRaw (
 void
 vta::bar_t::Reset()
 {
+	open_time_ = close_time_ = boost::posix_time::not_a_date_time;
 	last_price_ = kNullLastPrice;
 	tick_volume_ = kNullTickVolume;
-	clear_has_valid_request();
 }
-
-/* Apply a FlexRecord to a partial bar result.
- *
- * Returns <1> to continue processing, <2> to halt processing due to an error.
- */
-int
-vta::bar_t::OnFlexRecord(
-	FRTreeCallbackInfo* info
-	)
-{
-	CHECK(nullptr != info->callersData);
-	auto& bar = *reinterpret_cast<bar_t*> (info->callersData);
-
-/* extract from view */
-	const double   last_price  = *reinterpret_cast<double*>   (info->theView[kFRLastPrice].data);
-	const uint64_t tick_volume = *reinterpret_cast<uint64_t*> (info->theView[kFRTickVolume].data);
-
-/* add to accumulators */
-	bar.last_price_  (last_price);
-	bar.tick_volume_ (tick_volume);
-
-/* continue processing */
-	return 1;
-}
-
 
 /* eof */

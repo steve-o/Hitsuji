@@ -18,9 +18,6 @@
 #include "vta_bar.hh"
 #include "vta_test.hh"
 
-/* Maximum encoded size of an RSSL provider to client message. */
-#define MAX_MSG_SIZE 4096
-
 static const std::string kErrorMalformedRequest = "Malformed request.";
 static const std::string kErrorNotFound = "Not found in SearchEngine.";
 static const std::string kErrorInternal = "Internal error.";
@@ -40,7 +37,9 @@ hitsuji::hitsuji_t::hitsuji_t()
 /* Unique instance number, never decremented. */
 	, instance_ (instance_count_.fetch_add (1, boost::memory_order_relaxed))
 	, manager_ (nullptr)
-{	
+	, vta_bar_ (std::make_shared<vta::bar_t> ("w0"))
+	, vta_test_ (std::make_shared<vta::test_t> ("w0"))
+{
 }
 
 hitsuji::hitsuji_t::~hitsuji_t()
@@ -191,6 +190,17 @@ hitsuji::hitsuji_t::Initialize()
 			" }";
 		goto cleanup;
 	}
+	LOG(INFO) << "Initialisation complete.";
+	return true;
+cleanup:
+	Reset();
+	LOG(INFO) << "Initialisation failed.";
+	return false;
+}
+
+bool
+hitsuji::hitsuji_t::AcquireFlexRecordCursor()
+{
 	try {
 /* FlexRecPrimitives cursor */
 		manager_ = FlexRecDefinitionManager::GetInstance (nullptr);
@@ -198,21 +208,15 @@ hitsuji::hitsuji_t::Initialize()
 		view_element_.reset (manager_->AcquireView(), [this](FlexRecViewElement* view_element){ manager_->ReleaseView (view_element); });
 		if (!manager_->GetView ("Trade", view_element_->view)) {
 			LOG(ERROR) << "FlexRecDefinitionManager::GetView failed.";
-			goto cleanup;
+			return false;
 		}
 	} catch (const std::exception& e) {
 		LOG(ERROR) << "FlexRecord::Initialisation exception: { "
 			"\"What\": \"" << e.what() << "\""
 			" }";
-		goto cleanup;
+		return false;
 	}
-
-	LOG(INFO) << "Initialisation complete.";
 	return true;
-cleanup:
-	Reset();
-	LOG(INFO) << "Initialisation failed.";
-	return false;
 }
 
 bool
@@ -225,16 +229,49 @@ hitsuji::hitsuji_t::OnRequest (
 	bool use_attribinfo_in_updates
 	)
 {
-	vta::bar_t vta (rwf_version, token, service_id, item_name);
-/* Validate request, e.g. be satisifed with this SearchEngine instance */
-	if (!(bool)vta) {
+	using namespace boost::chrono;
+	auto t0 = high_resolution_clock::now();
+
+/* clear analytic state */
+	vta_bar_->Reset();
+/* decompose request */
+	url_parse::Parsed parsed;
+	url_parse::Component file_name;
+	url_.assign ("null://localhost/");
+	url_.append (item_name);
+	url_parse::ParseStandardURL (url_.c_str(), static_cast<int>(url_.size()), &parsed);
+	if (parsed.path.is_valid())
+		url_parse::ExtractFileName (url_.c_str(), parsed.path, &file_name);
+	if (!file_name.is_valid()) {
+//		cumulative_stats_[CLIENT_PC_ITEM_REQUEST_REJECTED]++;
+//		cumulative_stats_[CLIENT_PC_ITEM_REQUEST_MALFORMED]++;
+//		LOG(INFO) << prefix_ << "Closing invalid request for \"" << item_name << "\"";
 		auto sp = client.lock();
 		return sp->ReplyWithClose (token, service_id, RSSL_DMT_MARKET_PRICE, item_name.c_str(), item_name.size(), use_attribinfo_in_updates,
 					RSSL_STREAM_CLOSED, RSSL_SC_NOT_FOUND, kErrorMalformedRequest);
 	}
+/* require a NULL terminated string */
+	underlying_symbol_.assign (url_.c_str() + file_name.begin, file_name.len);
+#ifndef CONFIG_AS_APPLICATION
+/* Check SearchEngine.exe inventory */
+	if (0 == TBPrimitives::IsSymbolExists (underlying_symbol_.c_str())) {
+//		cumulative_stats_[CLIENT_PC_ITEM_NOT_FOUND]++;
+//		cumulative_stats_[CLIENT_PC_ITEM_REQUEST_REJECTED]++;
+//		LOG(INFO) << prefix_ << "Closing request for unknown item \"" << underlying_symbol_ << "\".";
+		auto sp = client.lock();
+		return sp->ReplyWithClose (token, service_id, RSSL_DMT_MARKET_PRICE, item_name.c_str(), item_name.size(), use_attribinfo_in_updates,
+					RSSL_STREAM_CLOSED, RSSL_SC_NOT_FOUND, kErrorNotFound);
+	}
+#endif
+/* Validate request, e.g. be satisifed with this SearchEngine instance */
+	if (parsed.query.is_valid() && !vta_bar_->ParseRequest (url_, parsed.query)) {
+		auto sp = client.lock();
+		return sp->ReplyWithClose (token, service_id, RSSL_DMT_MARKET_PRICE, item_name.c_str(), item_name.size(), use_attribinfo_in_updates,
+					RSSL_STREAM_CLOSED, RSSL_SC_NOT_FOUND, kErrorMalformedRequest);
+	}	
 /* Fake asynchronous operation */
-//	if (!vta.Calculate (vta.underlying_symbol().c_str())) {
-	if (!vta.Calculate (TBPrimitives::GetSymbolHandle (vta.underlying_symbol().c_str(), 1), work_area_.get(), view_element_.get())) {
+//	if (!vta_bar_->Calculate (vta.underlying_symbol().c_str())) {
+	if (!vta_bar_->Calculate (TBPrimitives::GetSymbolHandle (underlying_symbol_.c_str(), 1), work_area_.get(), view_element_.get())) {
 		if (auto sp = client.lock()) {
 			return sp->ReplyWithClose (token, service_id, RSSL_DMT_MARKET_PRICE, item_name.c_str(), item_name.size(), use_attribinfo_in_updates,
 						RSSL_STREAM_CLOSED_RECOVER, RSSL_SC_ERROR, kErrorInternal);
@@ -242,14 +279,17 @@ hitsuji::hitsuji_t::OnRequest (
 			return false;
 		}
 	}
-	char buf[MAX_MSG_SIZE];
-	size_t length = sizeof (buf);
+/* Rssl response message */
+	buf_length_ = sizeof (buf_);
 	if (auto sp = client.lock()) {
-		if (!vta.WriteRaw (buf, &length)) {
+		if (!vta_bar_->WriteRaw (rwf_version, token, service_id, item_name, buf_, &buf_length_)) {
 			return sp->ReplyWithClose (token, service_id, RSSL_DMT_MARKET_PRICE, item_name.c_str(), item_name.size(), use_attribinfo_in_updates,
 						RSSL_STREAM_CLOSED_RECOVER, RSSL_SC_ERROR, kErrorInternal);
 		}
-		return sp->Reply (buf, length, token);
+		auto t1 = high_resolution_clock::now();
+		VLOG(3) << boost::chrono::duration_cast<boost::chrono::milliseconds> (t1 - t0).count() << "ms"
+			   " @ " << url_;
+		return sp->Reply (buf_, buf_length_, token);
 	} else {
 		return false;
 	}
@@ -264,7 +304,14 @@ hitsuji::hitsuji_t::Start()
 	if (!shutting_down_ && Initialize()) {
 /* Spawn new thread for message pump. */
 		event_thread_.reset (new boost::thread ([this]() {
-			MainLoop();
+			if (AcquireFlexRecordCursor())
+				MainLoop();
+/* Raise condition loop is complete. */
+			{
+				boost::lock_guard<boost::mutex> lock (mainloop_lock_);
+				mainloop_shutdown_ = true;
+			}
+			mainloop_cond_.notify_one();
 		}));
 	}
 	return true;
@@ -324,12 +371,6 @@ hitsuji::hitsuji_t::MainLoop()
 		boost::unique_lock<boost::shared_mutex> (global_list_lock_);
 		global_list_.remove (this);
 	}
-/* Raise condition loop is complete. */
-	{
-		boost::lock_guard<boost::mutex> lock (mainloop_lock_);
-		mainloop_shutdown_ = true;
-	}
-	mainloop_cond_.notify_one();
 }
 
 /* eof */

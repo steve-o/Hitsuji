@@ -15,6 +15,18 @@
 #include "upa.hh"
 #include "version.hh"
 
+/* Outstanding defects:
+ * warning C4244: '=' : conversion from 'const sbe_uint64_t' to 'int', possible loss of data
+ * warning C4244: 'return' : conversion from 'sbe_uint64_t' to 'int', possible loss of data
+ * warning C4146: unary minus operator applied to unsigned type, result still unsigned
+ * warning C4244: 'initializing' : conversion from 'sbe_int64_t' to 'int', possible loss of data
+ */
+#pragma warning(push)
+#pragma warning(disable: 4244 146)
+#include "hitsuji/MessageHeader.hpp"
+#include "hitsuji/Request.hpp"
+#pragma warning(pop)
+
 #include "vta_bar.hh"
 #include "vta_test.hh"
 
@@ -219,6 +231,26 @@ hitsuji::hitsuji_t::AcquireFlexRecordCursor()
 	return true;
 }
 
+void
+hitsuji::hitsuji_t::OnWorkerTask (
+	const char* buffer,
+	int length
+	)
+{
+	MessageHeader hdr;
+	Request msg;
+	const int version = 0;
+	hdr.wrap (const_cast<char*> (buffer), 0, version, length);
+	msg.wrapForDecode (const_cast<char*> (buffer), hdr.size(), hdr.blockLength(), hdr.version(), length);
+	LOG(INFO) << "request.rwfVersion=" << msg.rwfVersion();
+	LOG(INFO) << "request.token=" << msg.token();
+	LOG(INFO) << "request.serviceId=" << msg.serviceId();
+	LOG(INFO) << "request.useAttribInfoInUpdates=" << ((msg.useAttribInfoInUpdates() == BooleanType::YES) ? "true" : "false");
+	char tmp[1024];
+	msg.getItemName (tmp, sizeof (tmp));
+	LOG(INFO) << "request.ItemName=" << tmp;
+}
+
 bool
 hitsuji::hitsuji_t::OnRequest (
 	std::weak_ptr<client_t> client,
@@ -229,6 +261,30 @@ hitsuji::hitsuji_t::OnRequest (
 	bool use_attribinfo_in_updates
 	)
 {
+/* forward to worker */
+	char buffer[2048];
+	MessageHeader hdr;
+	Request msg;
+	const int version = 0;
+	hdr.wrap (buffer, 0, version, sizeof (buffer))
+	    .blockLength (Request::sbeBlockLength())
+	    .templateId (Request::sbeTemplateId())
+	    .schemaId (Request::sbeSchemaId())
+	    .version (Request::sbeSchemaVersion());
+	LOG(INFO) << "rwf_version=" << rwf_version;
+	LOG(INFO) << "token=" << token;
+	LOG(INFO) << "service_id=" << service_id;
+	LOG(INFO) << "use_attribinfo_in_updates=" << (use_attribinfo_in_updates ? "true" : "false");
+	LOG(INFO) << "item_name=" << item_name;
+	msg.wrapForEncode (buffer, hdr.size(), sizeof (buffer))
+	    .rwfVersion (rwf_version)
+	    .token (token)
+	    .serviceId (service_id)
+	    .useAttribInfoInUpdates (use_attribinfo_in_updates ? BooleanType::YES : BooleanType::NO);
+	msg.putItemName (item_name.c_str(), static_cast<int> (item_name.size()));
+
+	OnWorkerTask (buffer, hdr.size() + msg.size());
+
 	using namespace boost::chrono;
 	auto t0 = high_resolution_clock::now();
 

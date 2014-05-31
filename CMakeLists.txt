@@ -95,26 +95,18 @@ else (CMAKE_BUILD_TYPE STREQUAL "Debug")
 	set(ZEROMQ_RUNTIME_LIBRARIES "${ZEROMQ_ROOT}/bin/libzmq-v100-mt.dll")
 endif (CMAKE_BUILD_TYPE STREQUAL "Debug")
 
-# Google Protocol BUffers
-if (MSVC11)
-	set(PROTOBUF_BUILD_COMPILER "vc110")
-elseif (MSVC10)
-	set(PROTOBUF_BUILD_COMPILER "vc100")
-endif ()
-set(PROTOBUF_SRC_ROOT_FOLDER "D:/protobuf-2.4.1-${PROTOBUF_BUILD_COMPILER}-x64")
-find_package (Protobuf REQUIRED)
+# Simple Binary Encoding
+set(SBE_ROOT "${CMAKE_SOURCE_DIR}/third_party/simple-binary-encoding")
+set(SBE_INCLUDE_DIRS
+	${SBE_ROOT}/include
+	${CMAKE_SOURCE_DIR}/include/sbe
+)
 
 # Boost headers plus built libraries
 set(BOOST_ROOT D:/boost_1_54_0)
 set(BOOST_LIBRARYDIR ${BOOST_ROOT}/stage/lib)
 set(Boost_USE_STATIC_LIBS ON)
 find_package (Boost 1.50 COMPONENTS atomic chrono thread REQUIRED)
-
-# Boost Atomics
-set(Boost_INCLUDE_DIRS
-	"D:/boost.atomic"
-	${Boost_INCLUDE_DIRS}
-)
 
 # Python for source generators
 find_package(PythonInterp REQUIRED)
@@ -210,10 +202,6 @@ set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /d2Zi+")
 #-----------------------------------------------------------------------------
 # Generated source files
 
-PROTOBUF_GENERATE_CPP(PROTO_SRCS PROTO_HDRS src/provider.proto)
-
-set_source_files_properties(${PROTO_SRCS} PROPERTIES COMPILE_FLAGS "/W0")
-
 configure_file(
 	${CMAKE_SOURCE_DIR}/version_generator.py.in
 	${CMAKE_BINARY_DIR}/version_generator.py
@@ -293,7 +281,7 @@ include_directories(
 	${VHAYU_INCLUDE_DIRS}
 	${UPA_INCLUDE_DIRS}
 	${ZEROMQ_INCLUDE_DIRS}
-	${PROTOBUF_INCLUDE_DIRS}
+	${SBE_INCLUDE_DIRS}
 	${Boost_INCLUDE_DIRS}
 )
 
@@ -309,13 +297,12 @@ link_directories(
 # output
 
 if(CONFIG_AS_APPLICATION)
-	add_executable(Hitsuji ${cxx-sources} ${rc-sources} ${PROTO_SRCS} ${PROTO_HDRS})
+	add_executable(Hitsuji ${cxx-sources} ${rc-sources})
 	target_link_libraries(Hitsuji
 		${NETSNMP_LIBRARIES}
 		${UPA_LIBRARIES}
 		${Boost_LIBRARIES}
 		${ZEROMQ_LIBRARIES}
-		${PROTOBUF_LITE_LIBRARIES}
 		ws2_32.lib
 		wininet.lib
 		dbghelp.lib
@@ -326,14 +313,13 @@ if(CONFIG_AS_APPLICATION)
 		"${CMAKE_CURRENT_SOURCE_DIR}/config/Sawbuck ETW provider.reg"
 	)
 else(CONFIG_AS_APPLICATION)
-	add_library(Hitsuji SHARED ${cxx-sources} ${rc-sources} ${PROTO_SRCS} ${PROTO_HDRS})
+	add_library(Hitsuji SHARED ${cxx-sources} ${rc-sources})
 	target_link_libraries(Hitsuji
 		${NETSNMP_LIBRARIES}
 		${VHAYU_LIBRARIES}
 		${UPA_LIBRARIES}
 		${Boost_LIBRARIES}
 		${ZEROMQ_LIBRARIES}
-		${PROTOBUF_LITE_LIBRARIES}
 		ws2_32.lib
 		wininet.lib
 		dbghelp.lib

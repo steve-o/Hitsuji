@@ -80,6 +80,8 @@ namespace hitsuji
 /* Per thread workspace. */
 		bool AcquireFlexRecordCursor();
 
+		void OnWorkerTask (const char* buffer, int length);
+
 /* Start the encapsulated provider instance until Stop is called.  Stop may be
  * called to pre-emptively prevent execution.
  */

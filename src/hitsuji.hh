@@ -36,6 +36,7 @@ namespace hitsuji
 {
 	class provider_t;
 	class upa_t;
+	class worker_t;
 	class MessageHeader;
 	class Request;
 
@@ -80,9 +81,6 @@ namespace hitsuji
 	private:
 /* Run core event loop. */
 		void MainLoop();
-/* Per thread workspace. */
-		bool AcquireFlexRecordCursor();
-		void OnWorkerTask (const std::string& prefix_, const void* buffer, size_t length);
 
 /* Start the encapsulated provider instance until Stop is called.  Stop may be
  * called to pre-emptively prevent execution.
@@ -110,25 +108,13 @@ namespace hitsuji
 		std::shared_ptr<upa_t> upa_;
 /* UPA provider */
 		std::shared_ptr<provider_t> provider_;
-/* As worker state: */
-/* Parsing state for requested items. */
-		std::string url_;
-		std::string underlying_symbol_;
-/* FlexRecord cursor */
-		FlexRecDefinitionManager* manager_;
-		std::shared_ptr<FlexRecWorkAreaElement> work_area_;
-		std::shared_ptr<FlexRecViewElement> view_element_;
+/* Worker threads */
+		std::shared_ptr<worker_t> worker_;
 /* Sbe message buffer */
 		std::shared_ptr<MessageHeader> sbe_hdr_;
 		std::shared_ptr<Request> sbe_msg_;
 		char sbe_buf_[MAX_MSG_SIZE];
 		size_t sbe_length_;
-/* Rssl message buffer */
-		char rssl_buf_[MAX_MSG_SIZE];
-		size_t rssl_length_;
-/* Analytics*/
-		std::shared_ptr<vta::bar_t> vta_bar_;
-		std::shared_ptr<vta::test_t> vta_test_;
 	};
 
 } /* namespace hitsuji */

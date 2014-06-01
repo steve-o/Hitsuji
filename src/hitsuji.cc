@@ -14,6 +14,7 @@
 #include "provider.hh"
 #include "upa.hh"
 #include "version.hh"
+#include "worker.hh"
 
 /* Outstanding defects:
  * warning C4244: '=' : conversion from 'const sbe_uint64_t' to 'int', possible loss of data
@@ -26,13 +27,6 @@
 #include "hitsuji/MessageHeader.hpp"
 #include "hitsuji/Request.hpp"
 #pragma warning(pop)
-
-#include "vta_bar.hh"
-#include "vta_test.hh"
-
-static const std::string kErrorMalformedRequest = "Malformed request.";
-static const std::string kErrorNotFound = "Not found in SearchEngine.";
-static const std::string kErrorInternal = "Internal error.";
 
 /* Global weak pointer to shutdown as application */
 static std::weak_ptr<hitsuji::hitsuji_t> g_application;
@@ -48,11 +42,8 @@ hitsuji::hitsuji_t::hitsuji_t()
 	, shutting_down_ (false)
 /* Unique instance number, never decremented. */
 	, instance_ (instance_count_.fetch_add (1, boost::memory_order_relaxed))
-	, manager_ (nullptr)
-	, sbe_hdr_ (std::make_shared<hitsuji::MessageHeader>())
-	, sbe_msg_ (std::make_shared<hitsuji::Request>())
-	, vta_bar_ (std::make_shared<vta::bar_t> ("w0"))
-	, vta_test_ (std::make_shared<vta::test_t> ("w0"))
+	, sbe_hdr_ (new hitsuji::MessageHeader())
+	, sbe_msg_ (new hitsuji::Request())
 {
 }
 
@@ -204,174 +195,23 @@ hitsuji::hitsuji_t::Initialize()
 			" }";
 		goto cleanup;
 	}
+	try {
+/* Worker threads */
+		worker_.reset (new worker_t (provider_));
+		if (!(bool)worker_ || !worker_->Initialize())
+			goto cleanup;
+	} catch (const std::exception& e) {
+		LOG(ERROR) << "Worker::Initialisation exception: { "
+			"\"What\": \"" << e.what() << "\""
+			" }";
+		goto cleanup;
+	}
 	LOG(INFO) << "Initialisation complete.";
 	return true;
 cleanup:
 	Reset();
 	LOG(INFO) << "Initialisation failed.";
 	return false;
-}
-
-bool
-hitsuji::hitsuji_t::AcquireFlexRecordCursor()
-{
-	try {
-/* FlexRecPrimitives cursor */
-		manager_ = FlexRecDefinitionManager::GetInstance (nullptr);
-		work_area_.reset (manager_->AcquireWorkArea(), [this](FlexRecWorkAreaElement* work_area){ manager_->ReleaseWorkArea (work_area); });
-		view_element_.reset (manager_->AcquireView(), [this](FlexRecViewElement* view_element){ manager_->ReleaseView (view_element); });
-		if (!manager_->GetView ("Trade", view_element_->view)) {
-			LOG(ERROR) << "FlexRecDefinitionManager::GetView failed.";
-			return false;
-		}
-	} catch (const std::exception& e) {
-		LOG(ERROR) << "FlexRecord::Initialisation exception: { "
-			"\"What\": \"" << e.what() << "\""
-			" }";
-		return false;
-	}
-	return true;
-}
-
-void
-hitsuji::hitsuji_t::OnWorkerTask (
-	const std::string& prefix_,
-	const void* buffer,
-	size_t length
-	)
-{
-	MessageHeader hdr;
-	Request msg;
-	const int version = 0;
-	hdr.wrap (reinterpret_cast<char*> (const_cast<void*> (buffer)), 0, version, static_cast<int> (length));
-	msg.wrapForDecode (reinterpret_cast<char*> (const_cast<void*> (buffer)), hdr.size(), hdr.blockLength(), hdr.version(), static_cast<int> (length));
-	const uintptr_t handle = msg.handle();
-	const uint16_t rwf_version = msg.rwfVersion();
-	const int32_t token = msg.token();
-	const uint16_t service_id = msg.serviceId();
-	const bool use_attribinfo_in_updates = msg.useAttribInfoInUpdates() == BooleanType::YES;
-	const chromium::StringPiece item_name (msg.itemName(), msg.itemNameLength());
-
-	using namespace boost::chrono;
-	auto t0 = high_resolution_clock::now();
-
-/* clear analytic state */
-	vta_bar_->Reset();
-	rssl_length_ = sizeof (rssl_buf_);
-/* decompose request */
-	url_parse::Parsed parsed;
-	url_parse::Component file_name;
-	url_.assign ("null://localhost/");
-	url_.append (item_name.as_string());
-	url_parse::ParseStandardURL (url_.c_str(), static_cast<int>(url_.size()), &parsed);
-	if (parsed.path.is_valid())
-		url_parse::ExtractFileName (url_.c_str(), parsed.path, &file_name);
-	if (!file_name.is_valid()) {
-//		cumulative_stats_[CLIENT_PC_ITEM_REQUEST_REJECTED]++;
-//		cumulative_stats_[CLIENT_PC_ITEM_REQUEST_MALFORMED]++;
-		LOG(INFO) << prefix_ << "Closing invalid request for \"" << item_name << "\"";
-		if (!provider_->WriteRawClose (
-				rwf_version,
-				token,
-				service_id,
-				RSSL_DMT_MARKET_PRICE,
-				item_name,
-				use_attribinfo_in_updates,
-				RSSL_STREAM_CLOSED, RSSL_SC_NOT_FOUND, kErrorMalformedRequest,
-				rssl_buf_,
-				&rssl_length_
-				))
-		{
-			return;
-		}
-		goto send_reply;
-	}
-/* require a NULL terminated string */
-	underlying_symbol_.assign (url_.c_str() + file_name.begin, file_name.len);
-#ifndef CONFIG_AS_APPLICATION
-/* Check SearchEngine.exe inventory */
-	if (0 == TBPrimitives::IsSymbolExists (underlying_symbol_.c_str())) {
-//		cumulative_stats_[CLIENT_PC_ITEM_NOT_FOUND]++;
-//		cumulative_stats_[CLIENT_PC_ITEM_REQUEST_REJECTED]++;
-		LOG(INFO) << prefix_ << "Closing request for unknown item \"" << underlying_symbol_ << "\".";
-		if (!provider_->WriteRawClose (
-				rwf_version,
-				token,
-				service_id,
-				RSSL_DMT_MARKET_PRICE,
-				item_name,
-				use_attribinfo_in_updates,
-				RSSL_STREAM_CLOSED, RSSL_SC_NOT_FOUND, kErrorNotFound,
-				rssl_buf_,
-				&rssl_length_
-				))
-		{
-			return;
-		}
-		goto send_reply;
-	}
-#endif
-/* Validate request, e.g. be satisifed with this SearchEngine instance */
-	if (parsed.query.is_valid() && !vta_bar_->ParseRequest (url_, parsed.query)) {
-		if (!provider_->WriteRawClose (
-				rwf_version,
-				token,
-				service_id,
-				RSSL_DMT_MARKET_PRICE,
-				item_name,
-				use_attribinfo_in_updates,
-				RSSL_STREAM_CLOSED, RSSL_SC_NOT_FOUND, kErrorMalformedRequest,
-				rssl_buf_,
-				&rssl_length_
-				))
-		{
-			return;
-		}
-		goto send_reply;
-	}	
-/* Fake asynchronous operation */
-	if (!vta_bar_->Calculate (underlying_symbol_.c_str())) {
-//	if (!vta_bar_->Calculate (TBPrimitives::GetSymbolHandle (underlying_symbol_.c_str(), 1), work_area_.get(), view_element_.get())) {
-		if (!provider_->WriteRawClose (
-				rwf_version,
-				token,
-				service_id,
-				RSSL_DMT_MARKET_PRICE,
-				item_name,
-				use_attribinfo_in_updates,
-				RSSL_STREAM_CLOSED_RECOVER, RSSL_SC_ERROR, kErrorInternal,
-				rssl_buf_,
-				&rssl_length_
-				))
-		{
-			return;
-		}
-		goto send_reply;
-	}
-/* Response message with analytic payload */
-	if (!vta_bar_->WriteRaw (rwf_version, token, service_id, item_name, rssl_buf_, &rssl_length_)) {
-/* Extremely unlikely situation that writing the response fails but writing a close will not */
-		if (!provider_->WriteRawClose (
-				rwf_version,
-				token,
-				service_id,
-				RSSL_DMT_MARKET_PRICE,
-				item_name,
-				use_attribinfo_in_updates,
-				RSSL_STREAM_CLOSED_RECOVER, RSSL_SC_ERROR, kErrorInternal,
-				rssl_buf_,
-				&rssl_length_
-				))
-		{
-			return;
-		}
-		goto send_reply;
-	}
-
-send_reply:
-	auto t1 = high_resolution_clock::now();
-	VLOG(3) << boost::chrono::duration_cast<boost::chrono::milliseconds> (t1 - t0).count() << "ms @ " << item_name;
-	provider_->SendReply (reinterpret_cast<RsslChannel*> (handle), token, rssl_buf_, rssl_length_);
 }
 
 bool
@@ -399,8 +239,8 @@ hitsuji::hitsuji_t::OnRequest (
 	    .useAttribInfoInUpdates (use_attribinfo_in_updates ? BooleanType::YES : BooleanType::NO);
 	sbe_msg_->putItemName (item_name.c_str(), static_cast<int> (item_name.size()));
 
-	OnWorkerTask ("w0:", sbe_buf_, sbe_hdr_->size() + sbe_msg_->size());
-	return true;
+	LOG(INFO) << "Distributing task \"" << item_name << "\" to worker.";
+	return worker_->OnTask (sbe_buf_, sbe_hdr_->size() + sbe_msg_->size());
 }
 
 bool
@@ -412,13 +252,10 @@ hitsuji::hitsuji_t::Start()
 	if (!shutting_down_ && Initialize()) {
 /* Spawn new thread for message pump. */
 		event_thread_.reset (new boost::thread ([this]() {
-			if (AcquireFlexRecordCursor())
-				MainLoop();
+			MainLoop();
 /* Raise condition loop is complete. */
-			{
-				boost::lock_guard<boost::mutex> lock (mainloop_lock_);
-				mainloop_shutdown_ = true;
-			}
+			boost::lock_guard<boost::mutex> lock (mainloop_lock_);
+			mainloop_shutdown_ = true;
 			mainloop_cond_.notify_one();
 		}));
 	}
@@ -445,6 +282,8 @@ hitsuji::hitsuji_t::Stop()
 void
 hitsuji::hitsuji_t::Reset()
 {
+/* Worker threads */
+	worker_.reset();
 /* Close client sockets with reference counts on provider. */
 	if ((bool)provider_)
 		provider_->Close();

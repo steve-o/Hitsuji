@@ -19,6 +19,7 @@
 #include <vpf/vpf.h>
 
 #include "googleurl/url_parse.h"
+#include "chromium/string_piece.hh"
 #include "client.hh"
 #include "config.hh"
 

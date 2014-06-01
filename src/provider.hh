@@ -25,6 +25,7 @@
 #include <upa/upa.h>
 
 #include "chromium/debug/leak_tracker.hh"
+#include "chromium/string_piece.hh"
 #include "upa.hh"
 #include "client.hh"
 #include "config.hh"

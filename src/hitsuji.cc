@@ -330,8 +330,8 @@ hitsuji::hitsuji_t::OnWorkerTask (
 		goto send_reply;
 	}	
 /* Fake asynchronous operation */
-//	if (!vta_bar_->Calculate (vta.underlying_symbol().c_str())) {
-	if (!vta_bar_->Calculate (TBPrimitives::GetSymbolHandle (underlying_symbol_.c_str(), 1), work_area_.get(), view_element_.get())) {
+	if (!vta_bar_->Calculate (underlying_symbol_.c_str())) {
+//	if (!vta_bar_->Calculate (TBPrimitives::GetSymbolHandle (underlying_symbol_.c_str(), 1), work_area_.get(), view_element_.get())) {
 		if (!provider_->WriteRawClose (
 				rwf_version,
 				token,
@@ -399,7 +399,7 @@ hitsuji::hitsuji_t::OnRequest (
 	    .useAttribInfoInUpdates (use_attribinfo_in_updates ? BooleanType::YES : BooleanType::NO);
 	sbe_msg_->putItemName (item_name.c_str(), static_cast<int> (item_name.size()));
 
-	OnWorkerTask ("w0", sbe_buf_, sbe_hdr_->size() + sbe_msg_->size());
+	OnWorkerTask ("w0:", sbe_buf_, sbe_hdr_->size() + sbe_msg_->size());
 	return true;
 }
 

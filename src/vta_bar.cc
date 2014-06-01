@@ -76,9 +76,9 @@ vta::bar_t::ParseRequest (
 /* Value must convert to add NULL terminator for conversion APIs. */
 		value_.assign (url.data() + value_range.begin, value_range.len);
 		if (key == kOpenParameter) {
-			open_time_ = from_time_t (std::atol (value_.data()));
+			open_time_ = from_time_t (std::atol (value_.c_str()));
 		} else if (key == kCloseParameter) {
-			close_time_ = from_time_t (std::atol (value_.data()));
+			close_time_ = from_time_t (std::atol (value_.c_str()));
 		}
 	}
 /* Validation success. */
@@ -500,6 +500,7 @@ vta::bar_t::WriteRaw (
 			LOG(INFO) << prefix_ << "rsslValidateMsg succeeded.";
 		}
 	}
+	*length = static_cast<size_t> (buf.length);
 	return true;
 }
 

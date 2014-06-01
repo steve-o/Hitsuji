@@ -297,6 +297,7 @@ hitsuji::provider_t::WriteRawClose (
 			LOG(INFO) << "rsslValidateMsg succeeded.";
 		}
 	}
+	*length = static_cast<size_t> (buf.length);
 	return true;
 }
 

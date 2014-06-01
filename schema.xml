@@ -23,10 +23,11 @@
         </enum>
     </types>
     <message name="Request" id="1" description="Rssl request to worker thread">
-        <field name="rwfVersion" id="1" type="uint16"/>
-        <field name="token" id="2" type="int32"/>
-        <field name="serviceId" id="3" type="uint16"/>
-        <field name="useAttribInfoInUpdates" id="4" type="BooleanType"/>
-        <data name="itemName" id="5" type="varDataEncoding"/>
+        <field name="handle" id="1" type="uint64"/>
+        <field name="rwfVersion" id="2" type="uint16"/>
+        <field name="token" id="3" type="int32"/>
+        <field name="serviceId" id="4" type="uint16"/>
+        <field name="useAttribInfoInUpdates" id="5" type="BooleanType"/>
+        <data name="itemName" id="6" type="varDataEncoding"/>
     </message>
 </messageSchema>

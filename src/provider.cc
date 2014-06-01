@@ -140,6 +140,7 @@ hitsuji::provider_t::Close()
 		rssl_sock_ = nullptr;
 	}
 
+	boost::lock_guard<boost::shared_mutex> lock (clients_lock_);
 /* clients: three pass strategy */
 	VLOG_IF(3, clients_.size() > 0) << "Closing " << clients_.size() << " client sessions.";
 /* 1) send close notification */
@@ -188,6 +189,133 @@ hitsuji::provider_t::Close()
 		Close (*it);
 	}
 	connections_.clear();
+}
+
+bool
+hitsuji::provider_t::WriteRawClose (
+	uint16_t rwf_version,
+	int32_t request_token,
+	uint16_t service_id,
+	uint8_t model_type,
+	const chromium::StringPiece& item_name,
+	bool use_attribinfo_in_updates,
+	uint8_t stream_state,
+	uint8_t status_code,
+	const chromium::StringPiece& status_text,
+	void* data,
+	size_t* length
+	)
+{
+	RsslStatusMsg response = RSSL_INIT_STATUS_MSG;
+#ifndef NDEBUG
+/* Static initialisation sets all fields rather than only the minimal set
+ * required.  Use for debug mode and optimise for release builds.
+ */
+	RsslEncodeIterator it = RSSL_INIT_ENCODE_ITERATOR;
+#else
+	RsslEncodeIterator it;
+	rsslClearEncodeIterator (&it);
+#endif
+	RsslBuffer buf = { static_cast<uint32_t> (*length), static_cast<char*> (data) };
+	RsslRet rc;
+
+/* 7.5.9.2 Set the message model type of the response. */
+	response.msgBase.domainType = model_type;
+/* 7.5.9.3 Set response type. */
+	response.msgBase.msgClass = RSSL_MC_STATUS;
+/* No payload. */
+	response.msgBase.containerType = RSSL_DT_NO_DATA;
+/* Set the request token. */
+	response.msgBase.streamId = request_token;
+
+/* RDM 6.2.3 AttribInfo
+ * if the ReqMsg set AttribInfoInUpdates, then the AttribInfo must be provided for all
+ * Refresh, Status, and Update RespMsgs.
+ */
+	if (use_attribinfo_in_updates) {
+		DCHECK(!item_name.empty());
+		response.msgBase.msgKey.serviceId   = service_id;
+		response.msgBase.msgKey.nameType    = RDM_INSTRUMENT_NAME_TYPE_RIC;
+		response.msgBase.msgKey.name.data   = const_cast<char*> (item_name.data());
+		response.msgBase.msgKey.name.length = static_cast<uint32_t> (item_name.size());
+		response.msgBase.msgKey.flags = RSSL_MKF_HAS_SERVICE_ID | RSSL_MKF_HAS_NAME_TYPE | RSSL_MKF_HAS_NAME;
+		response.flags |= RSSL_STMF_HAS_MSG_KEY;
+	}
+	
+/* Item interaction state. */
+	response.state.streamState = stream_state;
+/* Data quality state. */
+	response.state.dataState = RSSL_DATA_SUSPECT;
+/* 11.2.6.1 Structure Members
+ * Note: An application should not trigger specific behavior based on this content
+ */
+	response.state.code = status_code;
+	response.state.text.data = const_cast<char*> (status_text.data()); /* 1-11361563014: text encoding undefined */
+	response.state.text.length = static_cast<uint32_t> (status_text.size()); /* Maximum 32,767 bytes */
+	response.flags |= RSSL_STMF_HAS_STATE;
+
+	rc = rsslSetEncodeIteratorBuffer (&it, &buf);
+	if (RSSL_RET_SUCCESS != rc) {
+		LOG(ERROR) << "rsslSetEncodeIteratorBuffer: { "
+			  "\"returnCode\": " << static_cast<signed> (rc) << ""
+			", \"enumeration\": \"" << rsslRetCodeToString (rc) << "\""
+			", \"text\": \"" << rsslRetCodeInfo (rc) << "\""
+			" }";
+		return false;
+	}
+	rc = rsslSetEncodeIteratorRWFVersion (&it, rwf_major_version (rwf_version), rwf_minor_version (rwf_version));
+	if (RSSL_RET_SUCCESS != rc) {
+		LOG(ERROR) << "rsslSetEncodeIteratorRWFVersion: { "
+			  "\"returnCode\": " << static_cast<signed> (rc) << ""
+			", \"enumeration\": \"" << rsslRetCodeToString (rc) << "\""
+			", \"text\": \"" << rsslRetCodeInfo (rc) << "\""
+			", \"majorVersion\": " << static_cast<unsigned> (rwf_major_version (rwf_version)) << ""
+			", \"minorVersion\": " << static_cast<unsigned> (rwf_minor_version (rwf_version)) << ""
+			" }";
+		return false;
+	}
+	rc = rsslEncodeMsg (&it, reinterpret_cast<RsslMsg*> (&response));
+	if (RSSL_RET_SUCCESS != rc) {
+		LOG(ERROR) << "rsslEncodeMsg: { "
+			  "\"returnCode\": " << static_cast<signed> (rc) << ""
+			", \"enumeration\": \"" << rsslRetCodeToString (rc) << "\""
+			", \"text\": \"" << rsslRetCodeInfo (rc) << "\""
+			" }";
+		return false;
+	}
+	buf.length = rsslGetEncodedBufferLength (&it);
+	LOG_IF(WARNING, 0 == buf.length) << "rsslGetEncodedBufferLength returned 0.";
+
+	if (DCHECK_IS_ON()) {
+/* Message validation. */
+		if (!rsslValidateMsg (reinterpret_cast<RsslMsg*> (&response))) {
+//			cumulative_stats_[CLIENT_PC_ITEM_CLOSE_MALFORMED]++;
+			LOG(ERROR) << "rsslValidateMsg failed.";
+			return false;
+		} else {
+//			cumulative_stats_[CLIENT_PC_ITEM_CLOSE_VALIDATED]++;
+			LOG(INFO) << "rsslValidateMsg succeeded.";
+		}
+	}
+	return true;
+}
+
+bool
+hitsuji::provider_t::SendReply (
+	RsslChannel*const handle,
+	int32_t token,
+	const void* data,
+	size_t length
+	)
+{
+	boost::shared_lock<boost::shared_mutex> lock (clients_lock_);
+	auto client = clients_.find (handle);
+	lock.unlock();
+/* client may have disconnected before reply is available. */
+	if (clients_.end() != client)
+		return client->second->SendReply (token, data, length);
+	else
+		return false;
 }
 
 void
@@ -254,9 +382,12 @@ hitsuji::provider_t::DoWork()
 				auto jt = it++;
 				connections_.erase (jt);
 /* Remove client from map */
-				auto kt = clients_.find (c);
-				if (clients_.end() != kt)
-					clients_.erase (kt);
+				{
+					boost::lock_guard<boost::shared_mutex> lock (clients_lock_);
+					auto kt = clients_.find (c);
+					if (clients_.end() != kt)
+						clients_.erase (kt);
+				}
 /* Remove RSSL socket from further event notification */
 				FD_CLR (c->socketId, &in_rfds_);
 				FD_CLR (c->socketId, &in_wfds_);
@@ -313,9 +444,12 @@ hitsuji::provider_t::DoWork()
 			auto jt = it++;
 			connections_.erase (jt);
 /* Remove client from map */
-			auto kt = clients_.find (c);
-			if (clients_.end() != kt)
-				clients_.erase (kt);
+			{
+				boost::lock_guard<boost::shared_mutex> lock (clients_lock_);
+				auto kt = clients_.find (c);
+				if (clients_.end() != kt)
+					clients_.erase (kt);
+			}
 /* Remove RSSL socket from further event notification */
 			FD_CLR (c->socketId, &in_rfds_);
 			FD_CLR (c->socketId, &in_wfds_);
@@ -593,8 +727,11 @@ hitsuji::provider_t::OnActiveClientSession (
 	cumulative_stats_[PROVIDER_PC_OMM_ACTIVE_CLIENT_SESSION_RECEIVED]++;
 	try {
 		auto handle = c;
-		auto address = c->clientIP;
-		if (!is_accepting_connections_ || clients_.size() == config_.session_capacity)
+		const auto address = c->clientIP;
+		boost::shared_lock<boost::shared_mutex> lock (clients_lock_);
+		const auto connection_count = clients_.size();
+		lock.unlock();
+		if (!is_accepting_connections_ || connection_count == config_.session_capacity)
 			RejectClientSession (handle, address);
 		else if (!AcceptClientSession (handle, address))
 			RejectClientSession (handle, address);
@@ -835,21 +972,21 @@ hitsuji::provider_t::AcceptClientSession (
 	if (0 == min_rwf_version_)
 	{
 		LOG(INFO) << "Setting RWF: { "
-				  "\"MajorVersion\": " << static_cast<unsigned> (client->rwf_major_version()) <<
-				", \"MinorVersion\": " << static_cast<unsigned> (client->rwf_minor_version()) <<
+				  "\"MajorVersion\": " << static_cast<unsigned> (rwf_major_version (client_rwf_version)) <<
+				", \"MinorVersion\": " << static_cast<unsigned> (rwf_minor_version (client_rwf_version)) <<
 				" }";
 		min_rwf_version_.store (client_rwf_version);
 	}
 	else if (min_rwf_version_ > client_rwf_version)
 	{
 		LOG(INFO) << "Degrading RWF: { "
-				  "\"MajorVersion\": " << static_cast<unsigned> (client->rwf_major_version()) <<
-				", \"MinorVersion\": " << static_cast<unsigned> (client->rwf_minor_version()) <<
+				  "\"MajorVersion\": " << static_cast<unsigned> (rwf_major_version (client_rwf_version)) <<
+				", \"MinorVersion\": " << static_cast<unsigned> (rwf_minor_version (client_rwf_version)) <<
 				" }";
 		min_rwf_version_.store (client_rwf_version);
 	}
 
-	boost::unique_lock<boost::shared_mutex> lock (clients_lock_);
+	boost::lock_guard<boost::shared_mutex> lock (clients_lock_);
 	clients_.emplace (std::make_pair (handle, client));
 	cumulative_stats_[PROVIDER_PC_CLIENT_SESSION_ACCEPTED]++;
 	return true;

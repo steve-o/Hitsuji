@@ -24,7 +24,7 @@ static const int kRdmActivityTime1Id		= 1010;
 static const int kRdmActivityDate1Id		= 875;
 
 vta::test_t::test_t (
-	const std::string& worker_name
+	const chromium::StringPiece& worker_name
 	)
 	: super (worker_name)
 {
@@ -36,7 +36,7 @@ vta::test_t::~test_t()
 
 bool
 vta::test_t::ParseRequest (
-	const std::string& url,
+	const chromium::StringPiece& url,
 	const url_parse::Component& parsed_query
 	)
 {
@@ -53,7 +53,7 @@ vta::test_t::ParseRequest (
  */
 bool
 vta::test_t::Calculate (
-	const char* symbol_name
+	const chromium::StringPiece& symbol_name
 	)
 {
 /* nop */
@@ -80,8 +80,8 @@ vta::test_t::WriteRaw (
 	uint16_t rwf_version,
 	int32_t token,
 	uint16_t service_id,
-	const std::string& item_name,
-	char* data,
+	const chromium::StringPiece& item_name,
+	void* data,
 	size_t* length
 	)
 {
@@ -93,7 +93,7 @@ vta::test_t::WriteRaw (
 	RsslEncodeIterator it;
 	rsslClearEncodeIterator (&it);
 #endif
-	RsslBuffer buf = { static_cast<uint32_t> (*length), data };
+	RsslBuffer buf = { static_cast<uint32_t> (*length), static_cast<char*> (data) };
 	RsslRet rc;
 
 	DCHECK(!item_name.empty());
@@ -112,7 +112,7 @@ vta::test_t::WriteRaw (
 /* 7.4.8.2 Create or re-use a request attribute object (4.2.4) */
 	response.msgBase.msgKey.serviceId   = service_id;
 	response.msgBase.msgKey.nameType    = RDM_INSTRUMENT_NAME_TYPE_RIC;
-	response.msgBase.msgKey.name.data   = const_cast<char*> (item_name.c_str());
+	response.msgBase.msgKey.name.data   = const_cast<char*> (item_name.data());
 	response.msgBase.msgKey.name.length = static_cast<uint32_t> (item_name.size());
 	response.msgBase.msgKey.flags = RSSL_MKF_HAS_SERVICE_ID | RSSL_MKF_HAS_NAME_TYPE | RSSL_MKF_HAS_NAME;
 	response.flags |= RSSL_RFMF_HAS_MSG_KEY;

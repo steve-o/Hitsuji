@@ -49,6 +49,8 @@ hitsuji::hitsuji_t::hitsuji_t()
 /* Unique instance number, never decremented. */
 	, instance_ (instance_count_.fetch_add (1, boost::memory_order_relaxed))
 	, manager_ (nullptr)
+	, sbe_hdr_ (std::make_shared<hitsuji::MessageHeader>())
+	, sbe_msg_ (std::make_shared<hitsuji::Request>())
 	, vta_bar_ (std::make_shared<vta::bar_t> ("w0"))
 	, vta_test_ (std::make_shared<vta::test_t> ("w0"))
 {
@@ -233,78 +235,56 @@ hitsuji::hitsuji_t::AcquireFlexRecordCursor()
 
 void
 hitsuji::hitsuji_t::OnWorkerTask (
-	const char* buffer,
-	int length
+	const std::string& prefix_,
+	const void* buffer,
+	size_t length
 	)
 {
 	MessageHeader hdr;
 	Request msg;
 	const int version = 0;
-	hdr.wrap (const_cast<char*> (buffer), 0, version, length);
-	msg.wrapForDecode (const_cast<char*> (buffer), hdr.size(), hdr.blockLength(), hdr.version(), length);
-	LOG(INFO) << "request.rwfVersion=" << msg.rwfVersion();
-	LOG(INFO) << "request.token=" << msg.token();
-	LOG(INFO) << "request.serviceId=" << msg.serviceId();
-	LOG(INFO) << "request.useAttribInfoInUpdates=" << ((msg.useAttribInfoInUpdates() == BooleanType::YES) ? "true" : "false");
-	char tmp[1024];
-	msg.getItemName (tmp, sizeof (tmp));
-	LOG(INFO) << "request.ItemName=" << tmp;
-}
-
-bool
-hitsuji::hitsuji_t::OnRequest (
-	std::weak_ptr<client_t> client,
-	uint16_t rwf_version, 
-	int32_t token,
-	uint16_t service_id,
-	const std::string& item_name,
-	bool use_attribinfo_in_updates
-	)
-{
-/* forward to worker */
-	char buffer[2048];
-	MessageHeader hdr;
-	Request msg;
-	const int version = 0;
-	hdr.wrap (buffer, 0, version, sizeof (buffer))
-	    .blockLength (Request::sbeBlockLength())
-	    .templateId (Request::sbeTemplateId())
-	    .schemaId (Request::sbeSchemaId())
-	    .version (Request::sbeSchemaVersion());
-	LOG(INFO) << "rwf_version=" << rwf_version;
-	LOG(INFO) << "token=" << token;
-	LOG(INFO) << "service_id=" << service_id;
-	LOG(INFO) << "use_attribinfo_in_updates=" << (use_attribinfo_in_updates ? "true" : "false");
-	LOG(INFO) << "item_name=" << item_name;
-	msg.wrapForEncode (buffer, hdr.size(), sizeof (buffer))
-	    .rwfVersion (rwf_version)
-	    .token (token)
-	    .serviceId (service_id)
-	    .useAttribInfoInUpdates (use_attribinfo_in_updates ? BooleanType::YES : BooleanType::NO);
-	msg.putItemName (item_name.c_str(), static_cast<int> (item_name.size()));
-
-	OnWorkerTask (buffer, hdr.size() + msg.size());
+	hdr.wrap (reinterpret_cast<char*> (const_cast<void*> (buffer)), 0, version, static_cast<int> (length));
+	msg.wrapForDecode (reinterpret_cast<char*> (const_cast<void*> (buffer)), hdr.size(), hdr.blockLength(), hdr.version(), static_cast<int> (length));
+	const uintptr_t handle = msg.handle();
+	const uint16_t rwf_version = msg.rwfVersion();
+	const int32_t token = msg.token();
+	const uint16_t service_id = msg.serviceId();
+	const bool use_attribinfo_in_updates = msg.useAttribInfoInUpdates() == BooleanType::YES;
+	const chromium::StringPiece item_name (msg.itemName(), msg.itemNameLength());
 
 	using namespace boost::chrono;
 	auto t0 = high_resolution_clock::now();
 
 /* clear analytic state */
 	vta_bar_->Reset();
+	rssl_length_ = sizeof (rssl_buf_);
 /* decompose request */
 	url_parse::Parsed parsed;
 	url_parse::Component file_name;
 	url_.assign ("null://localhost/");
-	url_.append (item_name);
+	url_.append (item_name.as_string());
 	url_parse::ParseStandardURL (url_.c_str(), static_cast<int>(url_.size()), &parsed);
 	if (parsed.path.is_valid())
 		url_parse::ExtractFileName (url_.c_str(), parsed.path, &file_name);
 	if (!file_name.is_valid()) {
 //		cumulative_stats_[CLIENT_PC_ITEM_REQUEST_REJECTED]++;
 //		cumulative_stats_[CLIENT_PC_ITEM_REQUEST_MALFORMED]++;
-//		LOG(INFO) << prefix_ << "Closing invalid request for \"" << item_name << "\"";
-		auto sp = client.lock();
-		return sp->ReplyWithClose (token, service_id, RSSL_DMT_MARKET_PRICE, item_name.c_str(), item_name.size(), use_attribinfo_in_updates,
-					RSSL_STREAM_CLOSED, RSSL_SC_NOT_FOUND, kErrorMalformedRequest);
+		LOG(INFO) << prefix_ << "Closing invalid request for \"" << item_name << "\"";
+		if (!provider_->WriteRawClose (
+				rwf_version,
+				token,
+				service_id,
+				RSSL_DMT_MARKET_PRICE,
+				item_name,
+				use_attribinfo_in_updates,
+				RSSL_STREAM_CLOSED, RSSL_SC_NOT_FOUND, kErrorMalformedRequest,
+				rssl_buf_,
+				&rssl_length_
+				))
+		{
+			return;
+		}
+		goto send_reply;
 	}
 /* require a NULL terminated string */
 	underlying_symbol_.assign (url_.c_str() + file_name.begin, file_name.len);
@@ -313,42 +293,114 @@ hitsuji::hitsuji_t::OnRequest (
 	if (0 == TBPrimitives::IsSymbolExists (underlying_symbol_.c_str())) {
 //		cumulative_stats_[CLIENT_PC_ITEM_NOT_FOUND]++;
 //		cumulative_stats_[CLIENT_PC_ITEM_REQUEST_REJECTED]++;
-//		LOG(INFO) << prefix_ << "Closing request for unknown item \"" << underlying_symbol_ << "\".";
-		auto sp = client.lock();
-		return sp->ReplyWithClose (token, service_id, RSSL_DMT_MARKET_PRICE, item_name.c_str(), item_name.size(), use_attribinfo_in_updates,
-					RSSL_STREAM_CLOSED, RSSL_SC_NOT_FOUND, kErrorNotFound);
+		LOG(INFO) << prefix_ << "Closing request for unknown item \"" << underlying_symbol_ << "\".";
+		if (!provider_->WriteRawClose (
+				rwf_version,
+				token,
+				service_id,
+				RSSL_DMT_MARKET_PRICE,
+				item_name,
+				use_attribinfo_in_updates,
+				RSSL_STREAM_CLOSED, RSSL_SC_NOT_FOUND, kErrorNotFound,
+				rssl_buf_,
+				&rssl_length_
+				))
+		{
+			return;
+		}
+		goto send_reply;
 	}
 #endif
 /* Validate request, e.g. be satisifed with this SearchEngine instance */
 	if (parsed.query.is_valid() && !vta_bar_->ParseRequest (url_, parsed.query)) {
-		auto sp = client.lock();
-		return sp->ReplyWithClose (token, service_id, RSSL_DMT_MARKET_PRICE, item_name.c_str(), item_name.size(), use_attribinfo_in_updates,
-					RSSL_STREAM_CLOSED, RSSL_SC_NOT_FOUND, kErrorMalformedRequest);
+		if (!provider_->WriteRawClose (
+				rwf_version,
+				token,
+				service_id,
+				RSSL_DMT_MARKET_PRICE,
+				item_name,
+				use_attribinfo_in_updates,
+				RSSL_STREAM_CLOSED, RSSL_SC_NOT_FOUND, kErrorMalformedRequest,
+				rssl_buf_,
+				&rssl_length_
+				))
+		{
+			return;
+		}
+		goto send_reply;
 	}	
 /* Fake asynchronous operation */
 //	if (!vta_bar_->Calculate (vta.underlying_symbol().c_str())) {
 	if (!vta_bar_->Calculate (TBPrimitives::GetSymbolHandle (underlying_symbol_.c_str(), 1), work_area_.get(), view_element_.get())) {
-		if (auto sp = client.lock()) {
-			return sp->ReplyWithClose (token, service_id, RSSL_DMT_MARKET_PRICE, item_name.c_str(), item_name.size(), use_attribinfo_in_updates,
-						RSSL_STREAM_CLOSED_RECOVER, RSSL_SC_ERROR, kErrorInternal);
-		} else {
-			return false;
+		if (!provider_->WriteRawClose (
+				rwf_version,
+				token,
+				service_id,
+				RSSL_DMT_MARKET_PRICE,
+				item_name,
+				use_attribinfo_in_updates,
+				RSSL_STREAM_CLOSED_RECOVER, RSSL_SC_ERROR, kErrorInternal,
+				rssl_buf_,
+				&rssl_length_
+				))
+		{
+			return;
 		}
+		goto send_reply;
 	}
-/* Rssl response message */
-	buf_length_ = sizeof (buf_);
-	if (auto sp = client.lock()) {
-		if (!vta_bar_->WriteRaw (rwf_version, token, service_id, item_name, buf_, &buf_length_)) {
-			return sp->ReplyWithClose (token, service_id, RSSL_DMT_MARKET_PRICE, item_name.c_str(), item_name.size(), use_attribinfo_in_updates,
-						RSSL_STREAM_CLOSED_RECOVER, RSSL_SC_ERROR, kErrorInternal);
+/* Response message with analytic payload */
+	if (!vta_bar_->WriteRaw (rwf_version, token, service_id, item_name, rssl_buf_, &rssl_length_)) {
+/* Extremely unlikely situation that writing the response fails but writing a close will not */
+		if (!provider_->WriteRawClose (
+				rwf_version,
+				token,
+				service_id,
+				RSSL_DMT_MARKET_PRICE,
+				item_name,
+				use_attribinfo_in_updates,
+				RSSL_STREAM_CLOSED_RECOVER, RSSL_SC_ERROR, kErrorInternal,
+				rssl_buf_,
+				&rssl_length_
+				))
+		{
+			return;
 		}
-		auto t1 = high_resolution_clock::now();
-		VLOG(3) << boost::chrono::duration_cast<boost::chrono::milliseconds> (t1 - t0).count() << "ms"
-			   " @ " << url_;
-		return sp->Reply (buf_, buf_length_, token);
-	} else {
-		return false;
+		goto send_reply;
 	}
+
+send_reply:
+	auto t1 = high_resolution_clock::now();
+	VLOG(3) << boost::chrono::duration_cast<boost::chrono::milliseconds> (t1 - t0).count() << "ms @ " << item_name;
+	provider_->SendReply (reinterpret_cast<RsslChannel*> (handle), token, rssl_buf_, rssl_length_);
+}
+
+bool
+hitsuji::hitsuji_t::OnRequest (
+	uintptr_t handle,
+	uint16_t rwf_version, 
+	int32_t token,
+	uint16_t service_id,
+	const std::string& item_name,
+	bool use_attribinfo_in_updates
+	)
+{
+/* distribute to worker */
+	static const int version = 0;
+	sbe_hdr_->wrap (sbe_buf_, 0, version, sizeof (sbe_buf_))
+	    .blockLength (Request::sbeBlockLength())
+	    .templateId (Request::sbeTemplateId())
+	    .schemaId (Request::sbeSchemaId())
+	    .version (Request::sbeSchemaVersion());
+	sbe_msg_->wrapForEncode (sbe_buf_, sbe_hdr_->size(), sizeof (sbe_buf_))
+	    .handle (handle)
+	    .rwfVersion (rwf_version)
+	    .token (token)
+	    .serviceId (service_id)
+	    .useAttribInfoInUpdates (use_attribinfo_in_updates ? BooleanType::YES : BooleanType::NO);
+	sbe_msg_->putItemName (item_name.c_str(), static_cast<int> (item_name.size()));
+
+	OnWorkerTask ("w0", sbe_buf_, sbe_hdr_->size() + sbe_msg_->size());
+	return true;
 }
 
 bool

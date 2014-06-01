@@ -35,6 +35,8 @@ namespace hitsuji
 {
 	class provider_t;
 	class upa_t;
+	class MessageHeader;
+	class Request;
 
 	class hitsuji_t
 /* Permit global weak pointer to application instance for shutdown notification. */
@@ -66,7 +68,7 @@ namespace hitsuji
 /* Quit an earlier call to Run(). */
 		void Quit();
 #endif
-		virtual bool OnRequest (std::weak_ptr<client_t> client, uint16_t rwf_version, int32_t token, uint16_t service_id, const std::string& item_name, bool use_attribinfo_in_updates) override;
+		virtual bool OnRequest (uintptr_t handle, uint16_t rwf_version, int32_t token, uint16_t service_id, const std::string& item_name, bool use_attribinfo_in_updates) override;
 
 		bool Initialize();
 		void Reset();
@@ -79,8 +81,7 @@ namespace hitsuji
 		void MainLoop();
 /* Per thread workspace. */
 		bool AcquireFlexRecordCursor();
-
-		void OnWorkerTask (const char* buffer, int length);
+		void OnWorkerTask (const std::string& prefix_, const void* buffer, size_t length);
 
 /* Start the encapsulated provider instance until Stop is called.  Stop may be
  * called to pre-emptively prevent execution.
@@ -116,9 +117,14 @@ namespace hitsuji
 		FlexRecDefinitionManager* manager_;
 		std::shared_ptr<FlexRecWorkAreaElement> work_area_;
 		std::shared_ptr<FlexRecViewElement> view_element_;
+/* Sbe message buffer */
+		std::shared_ptr<MessageHeader> sbe_hdr_;
+		std::shared_ptr<Request> sbe_msg_;
+		char sbe_buf_[MAX_MSG_SIZE];
+		size_t sbe_length_;
 /* Rssl message buffer */
-		char buf_[MAX_MSG_SIZE];
-		size_t buf_length_;
+		char rssl_buf_[MAX_MSG_SIZE];
+		size_t rssl_length_;
 /* Analytics*/
 		std::shared_ptr<vta::bar_t> vta_bar_;
 		std::shared_ptr<vta::test_t> vta_test_;

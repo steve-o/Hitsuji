@@ -16,6 +16,7 @@
 #include <upa/upa.h>
 
 #include "chromium/debug/leak_tracker.hh"
+#include "chromium/string_piece.hh"
 #include "upa.hh"
 #include "config.hh"
 #include "deleter.hh"
@@ -79,9 +80,9 @@ namespace hitsuji
 		public:
 		    Delegate() {}
 
-		    virtual bool OnRequest (std::weak_ptr<client_t> client, uint16_t rwf_version, int32_t token, uint16_t service_id, const std::string& item_name, bool use_attribinfo_in_updates) = 0;
+		    virtual bool OnRequest (uintptr_t handle, uint16_t rwf_version, int32_t token, uint16_t service_id, const std::string& item_name, bool use_attribinfo_in_updates) = 0;
 /* TBD */
-//		    virtual bool OnCancel (std::weak_ptr<client_t> client, uint16_t rwf_version, int32_t token, uint16_t service_id, const std::string& item_name, bool use_attribinfo_in_updates) = 0;
+//		    virtual bool OnCancel (uintptr_t handle, uint16_t rwf_version, int32_t token, uint16_t service_id, const std::string& item_name, bool use_attribinfo_in_updates) = 0;
 
 		protected:
 		    virtual ~Delegate() {}
@@ -93,8 +94,7 @@ namespace hitsuji
 		bool Initialize();
 		bool Close();
 
-		bool Reply (const void* data, size_t length, int32_t token);
-		bool ReplyWithClose (int32_t token, uint16_t service_id, uint8_t model_type, const char* name, size_t name_len, bool use_attribinfo_in_updates, uint8_t stream_state, uint8_t status_code, const std::string& status_text);
+		bool SendReply (int32_t token, const void* data, size_t length);
 
 /* RSSL client socket */
 		RsslChannel*const handle() const {
@@ -126,7 +126,7 @@ namespace hitsuji
 		bool AcceptLogin (const RsslRequestMsg* msg, int32_t login_token);
 
 		bool SendDirectoryResponse (int32_t token, const char* service_name, uint32_t filter_mask);
-		bool SendClose (int32_t token, uint16_t service_id, uint8_t model_type, const char* name, size_t name_len, bool use_attribinfo_in_updates, uint8_t stream_state, uint8_t status_code, const std::string& status_text);
+		bool SendClose (int32_t token, uint16_t service_id, uint8_t model_type, const chromium::StringPiece& item_name, bool use_attribinfo_in_updates, uint8_t stream_state, uint8_t status_code, const chromium::StringPiece& status_text);
 		int Submit (RsslBuffer* buf);
 
 		const boost::posix_time::ptime& NextPing() const {

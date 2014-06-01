@@ -138,15 +138,14 @@ hitsuji::client_t::Close()
 		VLOG(2) << prefix_ << "Removing " << tokens_.size() << " item streams.";
 		tokens_.clear();
 /* notify client session is no longer valid via login stream. */
-		return SendClose (login_token_,
-				    provider_->service_id(),
-				    RSSL_DMT_LOGIN,
-				    nullptr,
-				    0,
-				    false, /* no AttribInfo in MMT_LOGIN */
-				    RSSL_STREAM_CLOSED,
-				    RSSL_SC_NONE,
-				    kErrorNone);
+		return SendClose (
+			login_token_,
+			provider_->service_id(),
+			RSSL_DMT_LOGIN,
+			nullptr,
+			false, /* no AttribInfo in MMT_LOGIN */
+			RSSL_STREAM_CLOSED, RSSL_SC_NONE, kErrorNone
+			);
 	} else {
 		return true;
 	}
@@ -176,15 +175,14 @@ hitsuji::client_t::OnMsg (
 		cumulative_stats_[CLIENT_PC_RSSL_MSGS_REJECTED]++;
 		LOG(WARNING) << prefix_ << "Uncaught message: " << msg;
 /* abort connection if status message fails. */
-		return SendClose (msg->msgBase.streamId,
-				  msg->msgBase.msgKey.serviceId,
-				  msg->msgBase.domainType,
-				  msg->msgBase.msgKey.name.data,
-				  msg->msgBase.msgKey.name.length,
-				  true, /* always send AttribInfo */
-				  RSSL_STREAM_CLOSED,
-				  RSSL_SC_USAGE_ERROR,
-				  kErrorUnsupportedMsgClass);
+		return SendClose (
+			msg->msgBase.streamId,
+			msg->msgBase.msgKey.serviceId,
+			msg->msgBase.domainType,
+			chromium::StringPiece (msg->msgBase.msgKey.name.data, msg->msgBase.msgKey.name.length),
+			true, /* always send AttribInfo */
+			RSSL_STREAM_CLOSED, RSSL_SC_USAGE_ERROR, kErrorUnsupportedMsgClass
+			);
 	}
 }
 
@@ -215,15 +213,14 @@ hitsuji::client_t::OnRequestMsg (
 		cumulative_stats_[CLIENT_PC_REQUEST_MSGS_REJECTED]++;
 		LOG(WARNING) << prefix_ << "Uncaught request message: " << request_msg;
 /* abort connection if status message fails. */
-		return SendClose (request_msg->msgBase.streamId,
-				  request_msg->msgBase.msgKey.serviceId,
-				  request_msg->msgBase.domainType,
-				  request_msg->msgBase.msgKey.name.data,
-				  request_msg->msgBase.msgKey.name.length,
-				  RSSL_RQMF_MSG_KEY_IN_UPDATES == (request_msg->flags & RSSL_RQMF_MSG_KEY_IN_UPDATES),
-				  RSSL_STREAM_CLOSED,
-				  RSSL_SC_USAGE_ERROR,
-				  kErrorUnsupportedRequest);
+		return SendClose (
+			request_msg->msgBase.streamId,
+			request_msg->msgBase.msgKey.serviceId,
+			request_msg->msgBase.domainType,
+			chromium::StringPiece (request_msg->msgBase.msgKey.name.data, request_msg->msgBase.msgKey.name.length),
+			RSSL_RQMF_MSG_KEY_IN_UPDATES == (request_msg->flags & RSSL_RQMF_MSG_KEY_IN_UPDATES),
+			RSSL_STREAM_CLOSED, RSSL_SC_USAGE_ERROR, kErrorUnsupportedRequest
+			);
 	}
 }
 
@@ -733,15 +730,14 @@ hitsuji::client_t::OnDictionaryRequest (
 	LOG(INFO) << prefix_ << "DictionaryRequest:" << request_msg;
 
 /* Unsupported for this provider and declared so in the directory. */
-	return SendClose (request_msg->msgBase.streamId,
-			  request_msg->msgBase.msgKey.serviceId,
-			  request_msg->msgBase.domainType,
-			  request_msg->msgBase.msgKey.name.data,
-			  request_msg->msgBase.msgKey.name.length,
-			  RSSL_RQMF_MSG_KEY_IN_UPDATES == (request_msg->flags & RSSL_RQMF_MSG_KEY_IN_UPDATES),
-			  RSSL_STREAM_CLOSED,
-			  RSSL_SC_USAGE_ERROR,
-			  kErrorUnsupportedDictionary);
+	return SendClose (
+		request_msg->msgBase.streamId,
+		request_msg->msgBase.msgKey.serviceId,
+		request_msg->msgBase.domainType,
+		chromium::StringPiece (request_msg->msgBase.msgKey.name.data, request_msg->msgBase.msgKey.name.length),
+		RSSL_RQMF_MSG_KEY_IN_UPDATES == (request_msg->flags & RSSL_RQMF_MSG_KEY_IN_UPDATES),
+		RSSL_STREAM_CLOSED, RSSL_SC_USAGE_ERROR, kErrorUnsupportedDictionary
+		);
 }
 
 bool
@@ -776,8 +772,14 @@ hitsuji::client_t::OnItemRequest (
 		cumulative_stats_[CLIENT_PC_ITEM_REQUEST_REJECTED]++;
 		cumulative_stats_[CLIENT_PC_ITEM_REQUEST_BEFORE_LOGIN]++;
 		LOG(INFO) << prefix_ << "Closing request for client without accepted login.";
-		return SendClose (request_token, service_id, model_type, item_name.c_str(), item_name.size(), use_attribinfo_in_updates,
-					RSSL_STREAM_CLOSED, RSSL_SC_USAGE_ERROR, kErrorLoginRequired);
+		return SendClose (
+			request_token,
+			service_id,
+			model_type,
+			item_name,
+			use_attribinfo_in_updates,
+			RSSL_STREAM_CLOSED, RSSL_SC_USAGE_ERROR, kErrorLoginRequired
+			);
 	}
 
 /* Filtered before entry. */
@@ -815,14 +817,14 @@ hitsuji::client_t::OnItemRequest (
 	} else {
 		tokens_.emplace (request_token);
 	}
-	return delegate_->OnRequest (shared_from_this(), rwf_version(), request_token, service_id, item_name, use_attribinfo_in_updates);
+	return delegate_->OnRequest (reinterpret_cast<uintptr_t> (handle_), rwf_version(), request_token, service_id, item_name, use_attribinfo_in_updates);
 }
 
 bool
-hitsuji::client_t::Reply (
+hitsuji::client_t::SendReply (
+	int32_t request_token,
 	const void* data,
-	size_t length,
-	int32_t request_token
+	size_t length
 	)
 {
 	RsslBuffer* buf;
@@ -859,25 +861,6 @@ cleanup:
 			" }";
 	}
 	return false;
-}
-
-bool
-hitsuji::client_t::ReplyWithClose (
-	int32_t request_token,
-	uint16_t service_id,
-	uint8_t model_type,
-	const char* name,
-	size_t name_len,
-	bool use_attribinfo_in_updates,
-	uint8_t stream_state,
-	uint8_t status_code,
-	const std::string& status_text
-	)
-{
-/* Drop response if token already canceled */
-	if (0 == tokens_.erase (request_token))
-		return true;
-	return SendClose (request_token, service_id, model_type, name, name_len, use_attribinfo_in_updates, stream_state, status_code, status_text);
 }
 
 bool
@@ -1130,75 +1113,15 @@ hitsuji::client_t::SendClose (
 	int32_t request_token,
 	uint16_t service_id,
 	uint8_t model_type,
-	const char* name,
-	size_t name_len,
+	const chromium::StringPiece& item_name,
 	bool use_attribinfo_in_updates,
 	uint8_t stream_state,
 	uint8_t status_code,
-	const std::string& status_text
+	const chromium::StringPiece& status_text
 	)
 {
-	RsslStatusMsg response = RSSL_INIT_STATUS_MSG;
-#ifndef NDEBUG
-/* Static initialisation sets all fields rather than only the minimal set
- * required.  Use for debug mode and optimise for release builds.
- */
-	RsslEncodeIterator it = RSSL_INIT_ENCODE_ITERATOR;
-#else
-	RsslEncodeIterator it;
-	rsslClearEncodeIterator (&it);
-#endif
 	RsslBuffer* buf;
 	RsslError rssl_err;
-	RsslRet rc;
-
-	DCHECK(name_len > 0);
-	DCHECK(nullptr != name);
-	VLOG(2) << prefix_ << "Sending item close { "
-		  "\"RequestToken\": " << request_token << ""
-		", \"ServiceID\": " << service_id << ""
-		", \"MsgModelType\": " << internal::domain_type_string (static_cast<RsslDomainTypes> (model_type)) << ""
-		", \"Name\": \"" << std::string (name, name_len) << "\""
-		", \"NameLen\": " << name_len << ""
-		", \"AttribInfoInUpdates\": " << (use_attribinfo_in_updates ? "true" : "false") << ""
-		", \"StatusCode\": " << rsslStateCodeToString (status_code) << ""
-		", \"StatusText\": \"" << status_text << "\""
-		" }";
-
-/* 7.5.9.2 Set the message model type of the response. */
-	response.msgBase.domainType = model_type;
-/* 7.5.9.3 Set response type. */
-	response.msgBase.msgClass = RSSL_MC_STATUS;
-/* No payload. */
-	response.msgBase.containerType = RSSL_DT_NO_DATA;
-/* Set the request token. */
-	response.msgBase.streamId = request_token;
-
-/* RDM 6.2.3 AttribInfo
- * if the ReqMsg set AttribInfoInUpdates, then the AttribInfo must be provided for all
- * Refresh, Status, and Update RespMsgs.
- */
-	if (use_attribinfo_in_updates) {
-		response.msgBase.msgKey.serviceId   = service_id;
-		response.msgBase.msgKey.nameType    = RDM_INSTRUMENT_NAME_TYPE_RIC;
-		response.msgBase.msgKey.name.data   = const_cast<char*> (name);
-		response.msgBase.msgKey.name.length = static_cast<uint32_t> (name_len);
-		response.msgBase.msgKey.flags = RSSL_MKF_HAS_SERVICE_ID | RSSL_MKF_HAS_NAME_TYPE | RSSL_MKF_HAS_NAME;
-		response.flags |= RSSL_STMF_HAS_MSG_KEY;
-	}
-	
-/* Item interaction state. */
-	response.state.streamState = stream_state;
-/* Data quality state. */
-	response.state.dataState = RSSL_DATA_SUSPECT;
-/* 11.2.6.1 Structure Members
- * Note: An application should not trigger specific behavior based on this content
- */
-	response.state.code = status_code;
-	response.state.text.data = const_cast<char*> (status_text.c_str()); /* 1-11361563014: text encoding undefined */
-	response.state.text.length = static_cast<uint32_t> (status_text.size()); /* Maximum 32,767 bytes */
-	response.flags |= RSSL_STMF_HAS_STATE;
-
 	buf = rsslGetBuffer (handle_, MAX_MSG_SIZE, RSSL_FALSE /* not packed */, &rssl_err);
 	if (nullptr == buf) {
 		LOG(ERROR) << prefix_ << "rsslGetBuffer: { "
@@ -1210,50 +1133,21 @@ hitsuji::client_t::SendClose (
 			" }";
 		return false;
 	}
-	rc = rsslSetEncodeIteratorBuffer (&it, buf);
-	if (RSSL_RET_SUCCESS != rc) {
-		LOG(ERROR) << prefix_ << "rsslSetEncodeIteratorBuffer: { "
-			  "\"returnCode\": " << static_cast<signed> (rc) << ""
-			", \"enumeration\": \"" << rsslRetCodeToString (rc) << "\""
-			", \"text\": \"" << rsslRetCodeInfo (rc) << "\""
-			" }";
+	size_t rssl_length = buf->length;
+	VLOG(2) << prefix_ << "Sending item close { "
+		  "\"RequestToken\": " << request_token << ""
+		", \"ServiceID\": " << service_id << ""
+		", \"MsgModelType\": " << internal::domain_type_string (static_cast<RsslDomainTypes> (model_type)) << ""
+		", \"Name\": \"" << item_name << "\""
+		", \"NameLen\": " << item_name.size() << ""
+		", \"AttribInfoInUpdates\": " << (use_attribinfo_in_updates ? "true" : "false") << ""
+		", \"StatusCode\": " << rsslStateCodeToString (status_code) << ""
+		", \"StatusText\": \"" << status_text << "\""
+		" }";
+	if (!provider_->WriteRawClose (rwf_version(), request_token, service_id, model_type, item_name, use_attribinfo_in_updates, stream_state, status_code, status_text, buf->data, &rssl_length)) {
 		goto cleanup;
 	}
-	rc = rsslSetEncodeIteratorRWFVersion (&it, rwf_major_version(), rwf_minor_version());
-	if (RSSL_RET_SUCCESS != rc) {
-		LOG(ERROR) << prefix_ << "rsslSetEncodeIteratorRWFVersion: { "
-			  "\"returnCode\": " << static_cast<signed> (rc) << ""
-			", \"enumeration\": \"" << rsslRetCodeToString (rc) << "\""
-			", \"text\": \"" << rsslRetCodeInfo (rc) << "\""
-			", \"majorVersion\": " << static_cast<unsigned> (rwf_major_version()) << ""
-			", \"minorVersion\": " << static_cast<unsigned> (rwf_minor_version()) << ""
-			" }";
-		goto cleanup;
-	}
-	rc = rsslEncodeMsg (&it, reinterpret_cast<RsslMsg*> (&response));
-	if (RSSL_RET_SUCCESS != rc) {
-		LOG(ERROR) << prefix_ << "rsslEncodeMsg: { "
-			  "\"returnCode\": " << static_cast<signed> (rc) << ""
-			", \"enumeration\": \"" << rsslRetCodeToString (rc) << "\""
-			", \"text\": \"" << rsslRetCodeInfo (rc) << "\""
-			" }";
-		goto cleanup;
-	}
-	buf->length = rsslGetEncodedBufferLength (&it);
-	LOG_IF(WARNING, 0 == buf->length) << prefix_ << "rsslGetEncodedBufferLength returned 0.";
-
-	if (DCHECK_IS_ON()) {
-/* Message validation. */
-		if (!rsslValidateMsg (reinterpret_cast<RsslMsg*> (&response))) {
-			cumulative_stats_[CLIENT_PC_ITEM_CLOSE_MALFORMED]++;
-			LOG(ERROR) << prefix_ << "rsslValidateMsg failed.";
-			goto cleanup;
-		} else {
-			cumulative_stats_[CLIENT_PC_ITEM_CLOSE_VALIDATED]++;
-			LOG(INFO) << prefix_ << "rsslValidateMsg succeeded.";
-		}
-	}
-
+	buf->length = static_cast<uint32_t> (rssl_length);
 	if (!Submit (buf)) {
 		goto cleanup;
 	}

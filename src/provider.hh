@@ -90,6 +90,9 @@ namespace hitsuji
 		void Quit();
 		void Close();
 
+		bool WriteRawClose (uint16_t rwf_version, int32_t token, uint16_t service_id, uint8_t model_type, const chromium::StringPiece& item_name, bool use_attribinfo_in_updates, uint8_t stream_state, uint8_t status_code, const chromium::StringPiece& status_text, void* data, size_t* length);
+		bool SendReply (RsslChannel*const handle, int32_t token, const void* buf, size_t length);
+
 		uint16_t rwf_version() const {
 			return min_rwf_version_.load();
 		}
@@ -136,6 +139,9 @@ namespace hitsuji
 			service_id_.store (service_id);
 		}
 
+		uint8_t rwf_major_version (uint16_t rwf_version) const { return rwf_version / 256; }
+		uint8_t rwf_minor_version (uint16_t rwf_version) const { return rwf_version % 256; }
+
 		const config_t& config_;
 
 /* UPA context. */
@@ -151,7 +157,6 @@ namespace hitsuji
 
 /* RSSL connection directory */
 		std::list<RsslChannel*const> connections_;
-
 /* RSSL Client Session directory */
 		std::unordered_map<RsslChannel*const, std::shared_ptr<client_t>> clients_;
 		boost::shared_mutex clients_lock_;

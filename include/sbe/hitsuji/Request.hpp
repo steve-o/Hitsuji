@@ -28,7 +28,7 @@ public:
 
     static sbe_uint16_t sbeBlockLength(void)
     {
-        return (sbe_uint16_t)9;
+        return (sbe_uint16_t)17;
     }
 
     static sbe_uint16_t sbeTemplateId(void)
@@ -109,9 +109,63 @@ public:
         return actingVersion_;
     }
 
-    static int rwfVersionId(void)
+    static int handleId(void)
     {
         return 1;
+    }
+
+    static int handleSinceVersion(void)
+    {
+         return 0;
+    }
+
+    bool handleInActingVersion(void)
+    {
+        return (actingVersion_ >= 0) ? true : false;
+    }
+
+
+    static const char *handleMetaAttribute(const MetaAttribute::Attribute metaAttribute)
+    {
+        switch (metaAttribute)
+        {
+            case MetaAttribute::EPOCH: return "unix";
+            case MetaAttribute::TIME_UNIT: return "nanosecond";
+            case MetaAttribute::SEMANTIC_TYPE: return "";
+        }
+
+        return "";
+    }
+
+    static sbe_uint64_t handleNullValue()
+    {
+        return 0xffffffffffffffffL;
+    }
+
+    static sbe_uint64_t handleMinValue()
+    {
+        return 0x0L;
+    }
+
+    static sbe_uint64_t handleMaxValue()
+    {
+        return 0xfffffffffffffffeL;
+    }
+
+    sbe_uint64_t handle(void) const
+    {
+        return SBE_LITTLE_ENDIAN_ENCODE_64(*((sbe_uint64_t *)(buffer_ + offset_ + 0)));
+    }
+
+    Request &handle(const sbe_uint64_t value)
+    {
+        *((sbe_uint64_t *)(buffer_ + offset_ + 0)) = SBE_LITTLE_ENDIAN_ENCODE_64(value);
+        return *this;
+    }
+
+    static int rwfVersionId(void)
+    {
+        return 2;
     }
 
     static int rwfVersionSinceVersion(void)
@@ -154,18 +208,18 @@ public:
 
     sbe_uint16_t rwfVersion(void) const
     {
-        return SBE_LITTLE_ENDIAN_ENCODE_16(*((sbe_uint16_t *)(buffer_ + offset_ + 0)));
+        return SBE_LITTLE_ENDIAN_ENCODE_16(*((sbe_uint16_t *)(buffer_ + offset_ + 8)));
     }
 
     Request &rwfVersion(const sbe_uint16_t value)
     {
-        *((sbe_uint16_t *)(buffer_ + offset_ + 0)) = SBE_LITTLE_ENDIAN_ENCODE_16(value);
+        *((sbe_uint16_t *)(buffer_ + offset_ + 8)) = SBE_LITTLE_ENDIAN_ENCODE_16(value);
         return *this;
     }
 
     static int tokenId(void)
     {
-        return 2;
+        return 3;
     }
 
     static int tokenSinceVersion(void)
@@ -208,18 +262,18 @@ public:
 
     sbe_int32_t token(void) const
     {
-        return SBE_LITTLE_ENDIAN_ENCODE_32(*((sbe_int32_t *)(buffer_ + offset_ + 2)));
+        return SBE_LITTLE_ENDIAN_ENCODE_32(*((sbe_int32_t *)(buffer_ + offset_ + 10)));
     }
 
     Request &token(const sbe_int32_t value)
     {
-        *((sbe_int32_t *)(buffer_ + offset_ + 2)) = SBE_LITTLE_ENDIAN_ENCODE_32(value);
+        *((sbe_int32_t *)(buffer_ + offset_ + 10)) = SBE_LITTLE_ENDIAN_ENCODE_32(value);
         return *this;
     }
 
     static int serviceIdId(void)
     {
-        return 3;
+        return 4;
     }
 
     static int serviceIdSinceVersion(void)
@@ -262,18 +316,18 @@ public:
 
     sbe_uint16_t serviceId(void) const
     {
-        return SBE_LITTLE_ENDIAN_ENCODE_16(*((sbe_uint16_t *)(buffer_ + offset_ + 6)));
+        return SBE_LITTLE_ENDIAN_ENCODE_16(*((sbe_uint16_t *)(buffer_ + offset_ + 14)));
     }
 
     Request &serviceId(const sbe_uint16_t value)
     {
-        *((sbe_uint16_t *)(buffer_ + offset_ + 6)) = SBE_LITTLE_ENDIAN_ENCODE_16(value);
+        *((sbe_uint16_t *)(buffer_ + offset_ + 14)) = SBE_LITTLE_ENDIAN_ENCODE_16(value);
         return *this;
     }
 
     static int useAttribInfoInUpdatesId(void)
     {
-        return 4;
+        return 5;
     }
 
     static int useAttribInfoInUpdatesSinceVersion(void)
@@ -301,12 +355,12 @@ public:
 
     BooleanType::Value useAttribInfoInUpdates(void) const
     {
-        return BooleanType::get((*((sbe_uint8_t *)(buffer_ + offset_ + 8))));
+        return BooleanType::get((*((sbe_uint8_t *)(buffer_ + offset_ + 16))));
     }
 
     Request &useAttribInfoInUpdates(const BooleanType::Value value)
     {
-        *((sbe_uint8_t *)(buffer_ + offset_ + 8)) = (value);
+        *((sbe_uint8_t *)(buffer_ + offset_ + 16)) = (value);
         return *this;
     }
 
@@ -339,7 +393,7 @@ public:
 
     static int itemNameId(void)
     {
-        return 5;
+        return 6;
     }
 
 

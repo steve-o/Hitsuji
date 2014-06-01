@@ -7,7 +7,6 @@
 #include <FlexRecReader.h>
 
 #include "chromium/logging.hh"
-#include "chromium/string_piece.hh"
 #include "upaostream.hh"
 #include "unix_epoch.hh"
 #include "rounding.hh"
@@ -49,7 +48,7 @@ static const boost::accumulators::accumulator_set<uint64_t,
 
 
 vta::bar_t::bar_t (
-	const std::string& worker_name
+	const chromium::StringPiece& worker_name
 	)
 	: super (worker_name)
 {
@@ -61,7 +60,7 @@ vta::bar_t::~bar_t()
 
 bool
 vta::bar_t::ParseRequest (
-	const std::string& url,
+	const chromium::StringPiece& url,
 	const url_parse::Component& parsed_query
 	)
 {
@@ -70,16 +69,16 @@ vta::bar_t::ParseRequest (
 	url_parse::Component query = parsed_query;
 	url_parse::Component key_range, value_range;
 /* For each key-value pair, i.e. ?a=x&b=y&c=z -> (a,x) (b,y) (c,z) */
-	while (url_parse::ExtractQueryKeyValue (url.c_str(), &query, &key_range, &value_range))
+	while (url_parse::ExtractQueryKeyValue (url.data(), &query, &key_range, &value_range))
 	{
 /* Lazy std::string conversion for key. */
-		const chromium::StringPiece key (url.c_str() + key_range.begin, key_range.len);
+		const chromium::StringPiece key (url.data() + key_range.begin, key_range.len);
 /* Value must convert to add NULL terminator for conversion APIs. */
-		value_.assign (url.c_str() + value_range.begin, value_range.len);
+		value_.assign (url.data() + value_range.begin, value_range.len);
 		if (key == kOpenParameter) {
-			open_time_ = from_time_t (std::atol (value_.c_str()));
+			open_time_ = from_time_t (std::atol (value_.data()));
 		} else if (key == kCloseParameter) {
-			close_time_ = from_time_t (std::atol (value_.c_str()));
+			close_time_ = from_time_t (std::atol (value_.data()));
 		}
 	}
 /* Validation success. */
@@ -96,13 +95,13 @@ vta::bar_t::ParseRequest (
  */
 bool
 vta::bar_t::Calculate (
-	const char* symbol_name
+	const chromium::StringPiece& symbol_name
 	)
 {
 #ifndef CONFIG_AS_APPLICATION
 /* Symbol names */
 	std::set<std::string> symbol_set;
-	symbol_set.insert (symbol_name);
+	symbol_set.insert (symbol_name.as_string());
 /* FlexRecord fields */
 	double   last_price;
 	uint64_t tick_volume;
@@ -205,8 +204,8 @@ vta::bar_t::WriteRaw (
 	uint16_t rwf_version,
 	int32_t token,
 	uint16_t service_id,
-	const std::string& item_name,
-	char* data,
+	const chromium::StringPiece& item_name,
+	void* data,
 	size_t* length
 	)
 {
@@ -218,7 +217,7 @@ vta::bar_t::WriteRaw (
 	RsslEncodeIterator it;
 	rsslClearEncodeIterator (&it);
 #endif
-	RsslBuffer buf = { static_cast<uint32_t> (*length), data };
+	RsslBuffer buf = { static_cast<uint32_t> (*length), static_cast<char*> (data) };
 	RsslRet rc;
 
 	DCHECK(!item_name.empty());
@@ -237,7 +236,7 @@ vta::bar_t::WriteRaw (
 /* 7.4.8.2 Create or re-use a request attribute object (4.2.4) */
 	response.msgBase.msgKey.serviceId   = service_id;
 	response.msgBase.msgKey.nameType    = RDM_INSTRUMENT_NAME_TYPE_RIC;
-	response.msgBase.msgKey.name.data   = const_cast<char*> (item_name.c_str());
+	response.msgBase.msgKey.name.data   = const_cast<char*> (item_name.data());
 	response.msgBase.msgKey.name.length = static_cast<uint32_t> (item_name.size());
 	response.msgBase.msgKey.flags = RSSL_MKF_HAS_SERVICE_ID | RSSL_MKF_HAS_NAME_TYPE | RSSL_MKF_HAS_NAME;
 	response.flags |= RSSL_RFMF_HAS_MSG_KEY;

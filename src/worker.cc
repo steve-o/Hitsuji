@@ -63,16 +63,16 @@ hitsuji::worker_t::Initialize()
 		if (!(bool)sbe_hdr_ || !(bool)sbe_msg_ || !(bool)vta_bar_ || !(bool)vta_test_)
 			goto cleanup;
 	} catch (const std::exception& e) {
-		LOG(ERROR) << "Initialisation exception: { "
+		LOG(ERROR) << prefix_ << "Initialisation exception: { "
 			"\"What\": \"" << e.what() << "\""
 			" }";
 		goto cleanup;
 	}
-	LOG(INFO) << "Initialisation complete.";
+	LOG(INFO) << prefix_ << "Initialisation complete.";
 	return true;
 cleanup:
 	Reset();
-	LOG(INFO) << "Initialisation failed.";
+	LOG(INFO) << prefix_ << "Initialisation failed.";
 	return false;
 }
 
@@ -85,11 +85,11 @@ hitsuji::worker_t::AcquireFlexRecordCursor()
 		work_area_.reset (manager_->AcquireWorkArea(), [this](FlexRecWorkAreaElement* work_area){ manager_->ReleaseWorkArea (work_area); });
 		view_element_.reset (manager_->AcquireView(), [this](FlexRecViewElement* view_element){ manager_->ReleaseView (view_element); });
 		if (!manager_->GetView ("Trade", view_element_->view)) {
-			LOG(ERROR) << "FlexRecDefinitionManager::GetView failed.";
+			LOG(ERROR) << prefix_ << "FlexRecDefinitionManager::GetView failed.";
 			return false;
 		}
 	} catch (const std::exception& e) {
-		LOG(ERROR) << "FlexRecord::Initialisation exception: { "
+		LOG(ERROR) << prefix_ << "FlexRecord::Initialisation exception: { "
 			"\"What\": \"" << e.what() << "\""
 			" }";
 		return false;
@@ -231,7 +231,7 @@ hitsuji::worker_t::OnTask (
 
 send_reply:
 	auto t1 = high_resolution_clock::now();
-	VLOG(3) << boost::chrono::duration_cast<boost::chrono::milliseconds> (t1 - t0).count() << "ms @ " << item_name;
+	VLOG(3) << prefix_ << boost::chrono::duration_cast<boost::chrono::milliseconds> (t1 - t0).count() << "ms @ " << item_name;
 	return provider_->SendReply (reinterpret_cast<RsslChannel*> (handle), token, rssl_buf_, rssl_length_);
 }
 

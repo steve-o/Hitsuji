@@ -10,6 +10,9 @@
 
 #include <windows.h>
 
+/* ZeroMQ messaging middleware. */
+#include <zmq.h>
+
 #include "chromium/logging.hh"
 #include "provider.hh"
 #include "upa.hh"
@@ -196,6 +199,25 @@ hitsuji::hitsuji_t::Initialize()
 		goto cleanup;
 	}
 	try {
+		static const std::function<int(void*)> zmq_term_deleter = zmq_term;
+		static const std::function<int(void*)> zmq_close_deleter = zmq_close;
+/* ZeroMQ context */
+		zmq_context_.reset (zmq_init (0), zmq_term_deleter);
+		if (!(bool)zmq_context_)
+			goto cleanup;
+/* pull for worker reply messages */
+		worker_reply_sock_.reset (zmq_socket (zmq_context_.get(), ZMQ_PULL), zmq_close_deleter);
+		if (!(bool)worker_reply_sock_)
+			goto cleanup;
+		int rc = zmq_bind (worker_reply_sock_.get(), "inproc://worker/reply");
+		if (rc)
+			goto cleanup;
+	} catch (const std::exception& e) {
+		LOG(ERROR) << "ZMQ::Exception: { "
+			"\"What\": \"" << e.what() << "\" }";
+		goto cleanup;
+	}
+	try {
 /* Worker threads */
 		worker_.reset (new worker_t (provider_));
 		if (!(bool)worker_ || !worker_->Initialize())
@@ -284,6 +306,12 @@ hitsuji::hitsuji_t::Reset()
 {
 /* Worker threads */
 	worker_.reset();
+	chromium::debug::LeakTracker<worker_t>::CheckForLeaks();
+/* Release ZMQ sockets before context */
+	CHECK (worker_reply_sock_.use_count() <= 1);
+	worker_reply_sock_.reset();
+	CHECK (zmq_context_.use_count() <= 1);
+	zmq_context_.reset();
 /* Close client sockets with reference counts on provider. */
 	if ((bool)provider_)
 		provider_->Close();

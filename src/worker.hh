@@ -13,6 +13,7 @@
 /* Velocity Analytics Plugin Framework */
 #include <vpf/vpf.h>
 
+#include "chromium/debug/leak_tracker.hh"
 #include "googleurl/url_parse.h"
 #include "chromium/string_piece.hh"
 
@@ -76,6 +77,8 @@ namespace hitsuji
 /* Analytics*/
 		std::shared_ptr<vta::bar_t> vta_bar_;
 		std::shared_ptr<vta::test_t> vta_test_;
+
+		chromium::debug::LeakTracker<worker_t> leak_tracker_;
 	};
 
 } /* namespace hitsuji */

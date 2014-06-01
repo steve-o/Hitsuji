@@ -110,6 +110,10 @@ namespace hitsuji
 		std::shared_ptr<provider_t> provider_;
 /* Worker threads */
 		std::shared_ptr<worker_t> worker_;
+/* ZMQ context. */
+		std::shared_ptr<void> zmq_context_;
+		std::shared_ptr<void> worker_abort_sock_;
+		std::shared_ptr<void> worker_reply_sock_;
 /* Sbe message buffer */
 		std::shared_ptr<MessageHeader> sbe_hdr_;
 		std::shared_ptr<Request> sbe_msg_;

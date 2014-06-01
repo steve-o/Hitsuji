@@ -81,18 +81,23 @@ set(UPA_LIBRARIES
 	librsslTransport
 )
 
-# ZeroMQ SDK 2.2.0
-set(ZEROMQ_ROOT "C:/Program Files/ZeroMQ 2.2.0")
-set(ZEROMQ_INCLUDE_DIRS "${ZEROMQ_ROOT}/include")
-set(ZEROMQ_LIBRARY_DIRS "${ZEROMQ_ROOT}/lib")
-set(ZEROMQ_LIBRARIES
-	optimized libzmq-v100-mt.lib
-	debug libzmq-v100-mt-gd.lib
+# ZeroMQ SDK
+if (MSVC11)
+	set(ZMQ_BUILD_COMPILER "v110")
+elseif (MSVC10)
+	set(ZMQ_BUILD_COMPILER "v100")
+endif ()
+set(ZMQ_ROOT "C:/Program Files/ZeroMQ 4.0.4")
+set(ZMQ_INCLUDE_DIRS "${ZMQ_ROOT}/include")
+set(ZMQ_LIBRARY_DIRS "${ZMQ_ROOT}/lib")
+set(ZMQ_LIBRARIES
+	optimized libzmq-${ZMQ_BUILD_COMPILER}-mt-4_0_4.lib
+	debug libzmq-${ZMQ_BUILD_COMPILER}-mt-gd-4_0_4.lib
 )
 if (CMAKE_BUILD_TYPE STREQUAL "Debug")
-	set(ZEROMQ_RUNTIME_LIBRARIES "${ZEROMQ_ROOT}/bin/libzmq-v100-mt-gd.dll")
+	set(ZMQ_RUNTIME_LIBRARIES "${ZMQ_ROOT}/bin/libzmq-${ZMQ_BUILD_COMPILER}-mt-gd-4_0_4.dll")
 else (CMAKE_BUILD_TYPE STREQUAL "Debug")
-	set(ZEROMQ_RUNTIME_LIBRARIES "${ZEROMQ_ROOT}/bin/libzmq-v100-mt.dll")
+	set(ZMQ_RUNTIME_LIBRARIES "${ZMQ_ROOT}/bin/libzmq-${ZMQ_BUILD_COMPILER}-mt-4_0_4.dll")
 endif (CMAKE_BUILD_TYPE STREQUAL "Debug")
 
 # Simple Binary Encoding
@@ -280,7 +285,7 @@ include_directories(
 	${NETSNMP_INCLUDE_DIRS}
 	${VHAYU_INCLUDE_DIRS}
 	${UPA_INCLUDE_DIRS}
-	${ZEROMQ_INCLUDE_DIRS}
+	${ZMQ_INCLUDE_DIRS}
 	${SBE_INCLUDE_DIRS}
 	${Boost_INCLUDE_DIRS}
 )
@@ -289,7 +294,7 @@ link_directories(
 	${NETSNMP_LIBRARY_DIRS}
 	${VHAYU_LIBRARY_DIRS}
 	${UPA_LIBRARY_DIRS}
-	${ZEROMQ_LIBRARY_DIRS}
+	${ZMQ_LIBRARY_DIRS}
 	${Boost_LIBRARY_DIRS}
 )
 
@@ -302,7 +307,7 @@ if(CONFIG_AS_APPLICATION)
 		${NETSNMP_LIBRARIES}
 		${UPA_LIBRARIES}
 		${Boost_LIBRARIES}
-		${ZEROMQ_LIBRARIES}
+		${ZMQ_LIBRARIES}
 		ws2_32.lib
 		wininet.lib
 		dbghelp.lib
@@ -319,7 +324,7 @@ else(CONFIG_AS_APPLICATION)
 		${VHAYU_LIBRARIES}
 		${UPA_LIBRARIES}
 		${Boost_LIBRARIES}
-		${ZEROMQ_LIBRARIES}
+		${ZMQ_LIBRARIES}
 		ws2_32.lib
 		wininet.lib
 		dbghelp.lib

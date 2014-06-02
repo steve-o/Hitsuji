@@ -20,6 +20,7 @@
 #pragma warning(disable: 4244 146)
 #include "hitsuji/MessageHeader.hpp"
 #include "hitsuji/Request.hpp"
+#include "hitsuji/Reply.hpp"
 #pragma warning(pop)
 
 #include "vta_bar.hh"
@@ -30,9 +31,9 @@ static const std::string kErrorNotFound = "Not found in SearchEngine.";
 static const std::string kErrorInternal = "Internal error.";
 
 hitsuji::worker_t::worker_t (
-	std::shared_ptr<provider_t> provider
+	std::shared_ptr<void>& zmq_context
 	)
-	: provider_ (provider)
+	: zmq_context_ (zmq_context)
 	, manager_ (nullptr)
 {
 }
@@ -54,16 +55,45 @@ hitsuji::worker_t::Initialize()
 	prefix_.assign (ss.str());
 
 	try {
-		if (!AcquireFlexRecordCursor())
+		static const std::function<int(void*)> zmq_close_deleter = zmq_close;
+/* Setup ZMQ sockets */
+		request_sock_.reset (zmq_socket (zmq_context_.get(), ZMQ_PULL), zmq_close_deleter);
+		if (!(bool)request_sock_)
 			goto cleanup;
-		sbe_hdr_.reset (new hitsuji::MessageHeader());
-		sbe_msg_.reset (new hitsuji::Request());
-		vta_bar_.reset (new vta::bar_t (prefix_));
-		vta_test_.reset (new vta::test_t (prefix_));
-		if (!(bool)sbe_hdr_ || !(bool)sbe_msg_ || !(bool)vta_bar_ || !(bool)vta_test_)
+		int rc = zmq_connect (request_sock_.get(), "inproc://worker/request");
+		if (-1 == rc)
+			goto cleanup;
+		reply_sock_.reset (zmq_socket (zmq_context_.get(), ZMQ_PUSH), zmq_close_deleter);
+		if (!(bool)reply_sock_)
+			goto cleanup;
+		rc = zmq_connect (reply_sock_.get(), "inproc://worker/reply");
+		if (-1 == rc)
 			goto cleanup;
 	} catch (const std::exception& e) {
-		LOG(ERROR) << prefix_ << "Initialisation exception: { "
+		LOG(ERROR) << prefix_ << "ZeroMQ::Exception: { "
+			"\"What\": \"" << e.what() << "\""
+			" }";
+		goto cleanup;
+	}
+	try {
+		if (!AcquireFlexRecordCursor())
+			goto cleanup;
+	} catch (const std::exception& e) {
+		LOG(ERROR) << prefix_ << "FlexRecord::Initialisation exception: { "
+			"\"What\": \"" << e.what() << "\""
+			" }";
+		goto cleanup;
+	}
+	try {
+		sbe_hdr_.reset (new hitsuji::MessageHeader());
+		sbe_request_.reset (new hitsuji::Request());
+		sbe_reply_.reset (new hitsuji::Reply());
+		vta_bar_.reset (new vta::bar_t (prefix_));
+		vta_test_.reset (new vta::test_t (prefix_));
+		if (!(bool)sbe_hdr_ || !(bool)sbe_request_ || !(bool)sbe_reply_ || !(bool)vta_bar_ || !(bool)vta_test_)
+			goto cleanup;
+	} catch (const std::exception& e) {
+		LOG(ERROR) << prefix_ << "SBE::Initialisation exception: { "
 			"\"What\": \"" << e.what() << "\""
 			" }";
 		goto cleanup;
@@ -79,19 +109,12 @@ cleanup:
 bool
 hitsuji::worker_t::AcquireFlexRecordCursor()
 {
-	try {
 /* FlexRecPrimitives cursor */
-		manager_ = FlexRecDefinitionManager::GetInstance (nullptr);
-		work_area_.reset (manager_->AcquireWorkArea(), [this](FlexRecWorkAreaElement* work_area){ manager_->ReleaseWorkArea (work_area); });
-		view_element_.reset (manager_->AcquireView(), [this](FlexRecViewElement* view_element){ manager_->ReleaseView (view_element); });
-		if (!manager_->GetView ("Trade", view_element_->view)) {
-			LOG(ERROR) << prefix_ << "FlexRecDefinitionManager::GetView failed.";
-			return false;
-		}
-	} catch (const std::exception& e) {
-		LOG(ERROR) << prefix_ << "FlexRecord::Initialisation exception: { "
-			"\"What\": \"" << e.what() << "\""
-			" }";
+	manager_ = FlexRecDefinitionManager::GetInstance (nullptr);
+	work_area_.reset (manager_->AcquireWorkArea(), [this](FlexRecWorkAreaElement* work_area){ manager_->ReleaseWorkArea (work_area); });
+	view_element_.reset (manager_->AcquireView(), [this](FlexRecViewElement* view_element){ manager_->ReleaseView (view_element); });
+	if (!manager_->GetView ("Trade", view_element_->view)) {
+		LOG(ERROR) << prefix_ << "FlexRecDefinitionManager::GetView failed.";
 		return false;
 	}
 	return true;
@@ -105,13 +128,20 @@ hitsuji::worker_t::OnTask (
 {
 	static const int version = 0;
 	sbe_hdr_->wrap (reinterpret_cast<char*> (const_cast<void*> (buffer)), 0, version, static_cast<int> (length));
-	sbe_msg_->wrapForDecode (reinterpret_cast<char*> (const_cast<void*> (buffer)), sbe_hdr_->size(), sbe_hdr_->blockLength(), sbe_hdr_->version(), static_cast<int> (length));
-	const uintptr_t handle = sbe_msg_->handle();
-	const uint16_t rwf_version = sbe_msg_->rwfVersion();
-	const int32_t token = sbe_msg_->token();
-	const uint16_t service_id = sbe_msg_->serviceId();
-	const bool use_attribinfo_in_updates = sbe_msg_->useAttribInfoInUpdates() == BooleanType::YES;
-	const chromium::StringPiece item_name (sbe_msg_->itemName(), sbe_msg_->itemNameLength());
+	sbe_request_->wrapForDecode (reinterpret_cast<char*> (const_cast<void*> (buffer)), sbe_hdr_->size(), sbe_hdr_->blockLength(), sbe_hdr_->version(), static_cast<int> (length));
+
+/* abort flag */
+	if (sbe_request_->flags().abort()) {
+		LOG(INFO) << prefix_ << "Abort flag received.";
+		return false;
+	}
+
+	const uintptr_t handle = sbe_request_->handle();
+	const uint16_t rwf_version = sbe_request_->rwfVersion();
+	const int32_t token = sbe_request_->token();
+	const uint16_t service_id = sbe_request_->serviceId();
+	const bool use_attribinfo_in_updates = sbe_request_->flags().useAttribInfoInUpdates();
+	const chromium::StringPiece item_name (sbe_request_->itemName(), sbe_request_->itemNameLength());
 
 	using namespace boost::chrono;
 	auto t0 = high_resolution_clock::now();
@@ -131,7 +161,7 @@ hitsuji::worker_t::OnTask (
 //		cumulative_stats_[CLIENT_PC_ITEM_REQUEST_REJECTED]++;
 //		cumulative_stats_[CLIENT_PC_ITEM_REQUEST_MALFORMED]++;
 		LOG(INFO) << prefix_ << "Closing invalid request for \"" << item_name << "\"";
-		if (!provider_->WriteRawClose (
+		if (!provider_t::WriteRawClose (
 				rwf_version,
 				token,
 				service_id,
@@ -155,7 +185,7 @@ hitsuji::worker_t::OnTask (
 //		cumulative_stats_[CLIENT_PC_ITEM_NOT_FOUND]++;
 //		cumulative_stats_[CLIENT_PC_ITEM_REQUEST_REJECTED]++;
 		LOG(INFO) << prefix_ << "Closing request for unknown item \"" << underlying_symbol_ << "\".";
-		if (!provider_->WriteRawClose (
+		if (!provider_t::WriteRawClose (
 				rwf_version,
 				token,
 				service_id,
@@ -174,7 +204,7 @@ hitsuji::worker_t::OnTask (
 #endif
 /* Validate request, e.g. be satisifed with this SearchEngine instance */
 	if (parsed.query.is_valid() && !vta_bar_->ParseRequest (url_, parsed.query)) {
-		if (!provider_->WriteRawClose (
+		if (!provider_t::WriteRawClose (
 				rwf_version,
 				token,
 				service_id,
@@ -193,7 +223,7 @@ hitsuji::worker_t::OnTask (
 /* Fake asynchronous operation */
 	if (!vta_bar_->Calculate (underlying_symbol_.c_str())) {
 //	if (!vta_bar_->Calculate (TBPrimitives::GetSymbolHandle (underlying_symbol_.c_str(), 1), work_area_.get(), view_element_.get())) {
-		if (!provider_->WriteRawClose (
+		if (!provider_t::WriteRawClose (
 				rwf_version,
 				token,
 				service_id,
@@ -212,7 +242,7 @@ hitsuji::worker_t::OnTask (
 /* Response message with analytic payload */
 	if (!vta_bar_->WriteRaw (rwf_version, token, service_id, item_name, rssl_buf_, &rssl_length_)) {
 /* Extremely unlikely situation that writing the response fails but writing a close will not */
-		if (!provider_->WriteRawClose (
+		if (!provider_t::WriteRawClose (
 				rwf_version,
 				token,
 				service_id,
@@ -232,18 +262,39 @@ hitsuji::worker_t::OnTask (
 send_reply:
 	auto t1 = high_resolution_clock::now();
 	VLOG(3) << prefix_ << boost::chrono::duration_cast<boost::chrono::milliseconds> (t1 - t0).count() << "ms @ " << item_name;
-	return provider_->SendReply (reinterpret_cast<RsslChannel*> (handle), token, rssl_buf_, rssl_length_);
+	return SendReply (handle, token);
 }
 
 bool
-hitsuji::worker_t::Start()
+hitsuji::worker_t::SendReply(
+	uintptr_t handle,
+	int32_t token
+	)
 {
-	return false;
-}
-
-void
-hitsuji::worker_t::Stop()
-{
+	static const int version = 0;
+	int rc;
+	rc = zmq_msg_init_size (&zmq_msg_, MessageHeader::size() + Reply::sbeBlockLength() + Reply::rsslBufferHeaderSize() + rssl_length_);
+	if (-1 == rc) {
+		LOG(ERROR) << prefix_ << "zmq_msg_init_size failed: " << zmq_strerror (zmq_errno());
+		return false;		}
+	sbe_hdr_->wrap (reinterpret_cast<char*> (zmq_msg_data (&zmq_msg_)), 0, version, static_cast<int> (zmq_msg_size (&zmq_msg_)))
+		.blockLength (Reply::sbeBlockLength())
+		.templateId (Reply::sbeTemplateId())
+		.schemaId (Reply::sbeSchemaId())
+		.version (Reply::sbeSchemaVersion());
+	sbe_reply_->wrapForEncode (reinterpret_cast<char*> (zmq_msg_data (&zmq_msg_)), sbe_hdr_->size(), static_cast<int> (zmq_msg_size (&zmq_msg_)))
+		.handle (handle)
+		.token (token);
+	sbe_reply_->putRsslBuffer (rssl_buf_, static_cast<int> (rssl_length_));
+	rc = zmq_msg_send (&zmq_msg_, reply_sock_.get(), 0);
+	if (-1 == rc) {
+		LOG(ERROR) << prefix_ << "zmq_send failed: " << zmq_strerror (zmq_errno());
+		rc = zmq_msg_close (&zmq_msg_);
+		LOG_IF(ERROR, -1 == rc) << prefix_ << "zmq_msg_close failed: " << zmq_strerror (zmq_errno());
+		return false;
+	} else {
+		return true;
+	}
 }
 
 void
@@ -254,6 +305,30 @@ hitsuji::worker_t::Reset()
 void
 hitsuji::worker_t::MainLoop()
 {
+	int rc;
+	LOG(INFO) << prefix_ << "Accepting requests.";
+	while (true) {
+		rc = zmq_msg_init (&zmq_msg_);
+		if (-1 == rc) {
+			LOG(ERROR) << "zmq_msg_init failed: " << zmq_strerror (zmq_errno());
+			break;
+		}
+		rc = zmq_msg_recv (&zmq_msg_, request_sock_.get(), 0);
+		if (-1 == rc) {
+			LOG(ERROR) << "zmq_recv failed: " << zmq_strerror (zmq_errno());
+			zmq_msg_close (&zmq_msg_);
+			break;
+		}
+		if (!OnTask (zmq_msg_data (&zmq_msg_), zmq_msg_size (&zmq_msg_))) {
+			break;
+		}
+		rc = zmq_msg_close (&zmq_msg_);
+		if (-1 == rc) {
+			LOG(ERROR) << "zmq_msg_close failed: " << zmq_strerror (zmq_errno());
+			break;
+		}
+	}
+	LOG(INFO) << prefix_ << "Muted.";
 }
 
 /* eof */

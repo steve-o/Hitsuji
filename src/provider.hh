@@ -81,7 +81,19 @@ namespace hitsuji
 		public std::enable_shared_from_this<provider_t>
 	{
 	public:
-		explicit provider_t (const config_t& config, std::shared_ptr<upa_t> upa, client_t::Delegate* delegate);
+/* Delegate handles specific behaviour of an worker reply. */
+		class Delegate {
+		public:
+		    Delegate() {}
+
+/* Return false on EAGAIN */
+		    virtual bool OnRead() = 0;
+
+		protected:
+		    virtual ~Delegate() {}
+		};
+
+		explicit provider_t (const config_t& config, std::shared_ptr<upa_t> upa, Delegate* reply_delegate, SOCKET reply_sock, client_t::Delegate* request_delegate);
 		~provider_t();
 
 		bool Initialize();
@@ -91,7 +103,7 @@ namespace hitsuji
 		void Quit();
 		void Close();
 
-		bool WriteRawClose (uint16_t rwf_version, int32_t token, uint16_t service_id, uint8_t model_type, const chromium::StringPiece& item_name, bool use_attribinfo_in_updates, uint8_t stream_state, uint8_t status_code, const chromium::StringPiece& status_text, void* data, size_t* length);
+		static bool WriteRawClose (uint16_t rwf_version, int32_t token, uint16_t service_id, uint8_t model_type, const chromium::StringPiece& item_name, bool use_attribinfo_in_updates, uint8_t stream_state, uint8_t status_code, const chromium::StringPiece& status_text, void* data, size_t* length);
 		bool SendReply (RsslChannel*const handle, int32_t token, const void* buf, size_t length);
 
 		uint16_t rwf_version() const {
@@ -140,13 +152,17 @@ namespace hitsuji
 			service_id_.store (service_id);
 		}
 
-		uint8_t rwf_major_version (uint16_t rwf_version) const { return rwf_version / 256; }
-		uint8_t rwf_minor_version (uint16_t rwf_version) const { return rwf_version % 256; }
+		static uint8_t rwf_major_version (uint16_t rwf_version) { return rwf_version / 256; }
+		static uint8_t rwf_minor_version (uint16_t rwf_version) { return rwf_version % 256; }
 
 		const config_t& config_;
 
+/* Reply socket to propagate events */
+		SOCKET reply_sock_;
+		Delegate* reply_delegate_;
 /* UPA context. */
 		std::shared_ptr<upa_t> upa_;
+/* Server socket for new connections */
 		RsslServer* rssl_sock_;
 /* This flag is set to false when Run should return. */
 		boost::atomic_bool keep_running_;
@@ -162,7 +178,7 @@ namespace hitsuji
 		std::unordered_map<RsslChannel*const, std::shared_ptr<client_t>> clients_;
 		boost::shared_mutex clients_lock_;
 
-		client_t::Delegate* delegate_;
+		client_t::Delegate* request_delegate_;
 		friend client_t;
 
 /* Reuters Wire Format versions. */

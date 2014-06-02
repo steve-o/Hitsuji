@@ -17,17 +17,22 @@
         </composite>
     </types>
     <types>
-        <enum name="BooleanType" encodingType="uint8">
-            <validValue name="NO">0</validValue>
-            <validValue name="YES">1</validValue>
-        </enum>
+        <set name="Flags" encodingType="uint8">
+            <choice name="abort">0</choice>
+            <choice name="useAttribInfoInUpdates">1</choice>
+        </set>
     </types>
     <message name="Request" id="1" description="Rssl request to worker thread">
         <field name="handle" id="1" type="uint64"/>
         <field name="rwfVersion" id="2" type="uint16"/>
         <field name="token" id="3" type="int32"/>
         <field name="serviceId" id="4" type="uint16"/>
-        <field name="useAttribInfoInUpdates" id="5" type="BooleanType"/>
+        <field name="flags" id="5" type="Flags"/>
         <data name="itemName" id="6" type="varDataEncoding"/>
+    </message>
+    <message name="Reply" id="2" description="Rssl reply from worker thread">
+        <field name="handle" id="1" type="uint64"/>
+        <field name="token" id="2" type="int32"/>
+        <data name="rsslBuffer" id="3" type="varDataEncoding"/>
     </message>
 </messageSchema>

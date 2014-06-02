@@ -10,9 +10,6 @@
 
 #include <windows.h>
 
-/* ZeroMQ messaging middleware. */
-#include <zmq.h>
-
 #include "chromium/logging.hh"
 #include "provider.hh"
 #include "upa.hh"
@@ -29,6 +26,7 @@
 #pragma warning(disable: 4244 146)
 #include "hitsuji/MessageHeader.hpp"
 #include "hitsuji/Request.hpp"
+#include "hitsuji/Reply.hpp"
 #pragma warning(pop)
 
 /* Global weak pointer to shutdown as application */
@@ -46,7 +44,8 @@ hitsuji::hitsuji_t::hitsuji_t()
 /* Unique instance number, never decremented. */
 	, instance_ (instance_count_.fetch_add (1, boost::memory_order_relaxed))
 	, sbe_hdr_ (new hitsuji::MessageHeader())
-	, sbe_msg_ (new hitsuji::Request())
+	, sbe_request_ (new hitsuji::Request())
+	, sbe_reply_ (new hitsuji::Reply())
 {
 }
 
@@ -173,6 +172,8 @@ hitsuji::hitsuji_t::Quit()
 bool
 hitsuji::hitsuji_t::Initialize()
 {
+	SOCKET reply_sock = INVALID_SOCKET;
+
 	LOG(INFO) << "Hitsuji: { "
 		  "\"version\": \"" << version_major << '.' << version_minor << '.' << version_build << "\""
 		", \"build\": { "
@@ -184,12 +185,53 @@ hitsuji::hitsuji_t::Initialize()
 		", \"config\": " << config_ <<
 		" }";
 	try {
+		static const std::function<int(void*)> zmq_term_deleter = zmq_ctx_term;
+		static const std::function<int(void*)> zmq_close_deleter = zmq_close;
+		int rc;
+/* ZeroMQ context */
+		zmq_context_.reset (zmq_ctx_new(), zmq_term_deleter);
+		if (!(bool)zmq_context_)
+			goto cleanup;
+/* 0 I/O threads required for ITC sockets */
+		rc = zmq_ctx_set (zmq_context_.get(), ZMQ_IO_THREADS, 0);
+		if (-1 == rc)
+			goto cleanup;
+		int zmq_version_major, zmq_version_minor, zmq_version_patch;
+		zmq_version (&zmq_version_major, &zmq_version_minor, &zmq_version_patch);
+		LOG(INFO) << "ZeroMQ: { "
+			  "\"version\": \"" << zmq_version_major << '.' << zmq_version_minor << '.' << zmq_version_patch << "\""
+			" }";
+/* PUSH to distribute tasks */
+		worker_request_sock_.reset (zmq_socket (zmq_context_.get(), ZMQ_PUSH), zmq_close_deleter);
+		if (!(bool)worker_request_sock_)
+			goto cleanup;
+		rc = zmq_bind (worker_request_sock_.get(), "inproc://worker/request");
+		if (-1 == rc)
+			goto cleanup;
+/* PULL for worker reply messages */
+		worker_reply_sock_.reset (zmq_socket (zmq_context_.get(), ZMQ_PULL), zmq_close_deleter);
+		if (!(bool)worker_reply_sock_)
+			goto cleanup;
+		rc = zmq_bind (worker_reply_sock_.get(), "inproc://worker/reply");
+		if (-1 == rc)
+			goto cleanup;
+/* Extract notification socket to pass to provider message pump */
+		size_t sock_len = sizeof (reply_sock);
+		rc = zmq_getsockopt (worker_reply_sock_.get(), ZMQ_FD, &reply_sock, &sock_len);
+		if (-1 == rc)
+			goto cleanup;
+	} catch (const std::exception& e) {
+		LOG(ERROR) << "ZMQ::Exception: { "
+			"\"What\": \"" << e.what() << "\" }";
+		goto cleanup;
+	}
+	try {
 /* UPA context */
 		upa_.reset (new upa_t (config_));
 		if (!(bool)upa_ || !upa_->Initialize())
 			goto cleanup;
 /* UPA provider */
-		provider_.reset (new provider_t (config_, upa_, static_cast<client_t::Delegate*> (this)));
+		provider_.reset (new provider_t (config_, upa_, static_cast<provider_t::Delegate*> (this), reply_sock, static_cast<client_t::Delegate*> (this)));
 		if (!(bool)provider_ || !provider_->Initialize())
 			goto cleanup;
 	} catch (const std::exception& e) {
@@ -199,29 +241,17 @@ hitsuji::hitsuji_t::Initialize()
 		goto cleanup;
 	}
 	try {
-		static const std::function<int(void*)> zmq_term_deleter = zmq_term;
-		static const std::function<int(void*)> zmq_close_deleter = zmq_close;
-/* ZeroMQ context */
-		zmq_context_.reset (zmq_init (0), zmq_term_deleter);
-		if (!(bool)zmq_context_)
-			goto cleanup;
-/* pull for worker reply messages */
-		worker_reply_sock_.reset (zmq_socket (zmq_context_.get(), ZMQ_PULL), zmq_close_deleter);
-		if (!(bool)worker_reply_sock_)
-			goto cleanup;
-		int rc = zmq_bind (worker_reply_sock_.get(), "inproc://worker/reply");
-		if (rc)
-			goto cleanup;
-	} catch (const std::exception& e) {
-		LOG(ERROR) << "ZMQ::Exception: { "
-			"\"What\": \"" << e.what() << "\" }";
-		goto cleanup;
-	}
-	try {
 /* Worker threads */
-		worker_.reset (new worker_t (provider_));
-		if (!(bool)worker_ || !worker_->Initialize())
+		auto worker = std::make_shared<worker_t> (zmq_context_);
+		if (!(bool)worker)
 			goto cleanup;
+		auto thread = std::make_shared<boost::thread> ([worker](){
+			if (worker->Initialize())
+				worker->MainLoop();
+		});
+		if (!(bool)thread)
+			goto cleanup;
+		workers_.emplace_front (std::make_pair (worker, thread));
 	} catch (const std::exception& e) {
 		LOG(ERROR) << "Worker::Initialisation exception: { "
 			"\"What\": \"" << e.what() << "\""
@@ -248,21 +278,143 @@ hitsuji::hitsuji_t::OnRequest (
 {
 /* distribute to worker */
 	static const int version = 0;
-	sbe_hdr_->wrap (sbe_buf_, 0, version, sizeof (sbe_buf_))
-	    .blockLength (Request::sbeBlockLength())
-	    .templateId (Request::sbeTemplateId())
-	    .schemaId (Request::sbeSchemaId())
-	    .version (Request::sbeSchemaVersion());
-	sbe_msg_->wrapForEncode (sbe_buf_, sbe_hdr_->size(), sizeof (sbe_buf_))
-	    .handle (handle)
-	    .rwfVersion (rwf_version)
-	    .token (token)
-	    .serviceId (service_id)
-	    .useAttribInfoInUpdates (use_attribinfo_in_updates ? BooleanType::YES : BooleanType::NO);
-	sbe_msg_->putItemName (item_name.c_str(), static_cast<int> (item_name.size()));
+	int rc = zmq_msg_init_size (&zmq_msg_, MessageHeader::size() + Request::sbeBlockLength() + Request::itemNameHeaderSize() + item_name.size());
+	if (rc) {
+		LOG(ERROR) << "zmq_msg_init_size failed: " << zmq_strerror (zmq_errno());
+		return false;
+	}
+	sbe_hdr_->wrap (reinterpret_cast<char*> (zmq_msg_data (&zmq_msg_)), 0, version, static_cast<int> (zmq_msg_size (&zmq_msg_)))
+		.blockLength (Request::sbeBlockLength())
+		.templateId (Request::sbeTemplateId())
+		.schemaId (Request::sbeSchemaId())
+		.version (Request::sbeSchemaVersion());
+	sbe_request_->wrapForEncode (reinterpret_cast<char*> (zmq_msg_data (&zmq_msg_)), sbe_hdr_->size(), static_cast<int> (zmq_msg_size (&zmq_msg_)))
+		.handle (handle)
+		.rwfVersion (rwf_version)
+		.token (token)
+		.serviceId (service_id);
+	sbe_request_->flags().clear()
+		.abort (false)
+		.useAttribInfoInUpdates (use_attribinfo_in_updates);
+	sbe_request_->putItemName (item_name.c_str(), static_cast<int> (item_name.size()));
+	LOG(INFO) << "Distributing task \"" << item_name << "\" to worker pool.";
+	rc = zmq_msg_send (&zmq_msg_, worker_request_sock_.get(), 0);
+	if (-1 == rc) {
+		LOG(ERROR) << "zmq_send failed: " << zmq_strerror (zmq_errno());
+		rc = zmq_msg_close (&zmq_msg_);
+		LOG_IF(ERROR, rc) << "zmq_msg_close failed: " << zmq_strerror (zmq_errno());
+		return false;
+	}
+	return true;
+}
 
-	LOG(INFO) << "Distributing task \"" << item_name << "\" to worker.";
-	return worker_->OnTask (sbe_buf_, sbe_hdr_->size() + sbe_msg_->size());
+bool
+hitsuji::hitsuji_t::OnReply (
+	const void* buffer,
+	size_t length
+	)
+{
+	static const int version = 0;
+	sbe_hdr_->wrap (reinterpret_cast<char*> (const_cast<void*> (buffer)), 0, version, static_cast<int> (length));
+	sbe_reply_->wrapForDecode (reinterpret_cast<char*> (const_cast<void*> (buffer)), sbe_hdr_->size(), sbe_hdr_->blockLength(), sbe_hdr_->version(), static_cast<int> (length));
+	const uintptr_t handle = sbe_request_->handle();
+	const int32_t token = sbe_request_->token();
+	return provider_->SendReply (reinterpret_cast<RsslChannel*> (handle), token, sbe_reply_->rsslBuffer(), sbe_reply_->rsslBufferLength());
+}
+
+bool
+hitsuji::hitsuji_t::OnRead()
+{
+	int rc, zmq_events = 0;
+	size_t zmq_events_len = sizeof (zmq_events);
+	rc = zmq_getsockopt (worker_reply_sock_.get(), ZMQ_EVENTS, &zmq_events, &zmq_events_len);
+	if (-1 == rc) {
+		LOG(ERROR) << "zmq_getsockopt (ZMQ_EVENTS) failed: " << zmq_strerror (zmq_errno());
+		return false;
+	}
+	if (zmq_events & ZMQ_POLLIN) {
+		rc = zmq_msg_init (&zmq_msg_);
+		if (-1 == rc) {
+			LOG(ERROR) << "zmq_msg_init failed: " << zmq_strerror (zmq_errno());
+			return false;
+		}
+		rc = zmq_msg_recv (&zmq_msg_, worker_reply_sock_.get(), 0);
+		if (-1 == rc) {
+			LOG(ERROR) << "zmq_recv failed: " << zmq_strerror (zmq_errno());
+			zmq_msg_close (&zmq_msg_);
+			return false;
+		}
+		if (!OnReply (zmq_msg_data (&zmq_msg_), zmq_msg_size (&zmq_msg_))) {
+			return false;
+		}
+		rc = zmq_msg_close (&zmq_msg_);
+		if (-1 == rc) {
+			LOG(ERROR) << "zmq_msg_close failed: " << zmq_strerror (zmq_errno());
+			return false;
+		}
+/* re-read events due to edge triggering */
+		rc = zmq_getsockopt (worker_reply_sock_.get(), ZMQ_EVENTS, &zmq_events, &zmq_events_len);
+		if (-1 == rc) {
+			LOG(ERROR) << "zmq_getsockopt (ZMQ_EVENTS) failed: " << zmq_strerror (zmq_errno());
+			return false;
+		}
+		if (zmq_events & ZMQ_POLLIN) {
+			return true;
+		}
+	}
+	return false;
+}
+
+bool
+hitsuji::hitsuji_t::AbortWorkers()
+{
+	unsigned active_workers = 0;
+	for (auto it = workers_.begin(); it != workers_.end(); ++it) {
+		if ((bool)it->second && it->second->joinable()) {
+			if (AbortOneWorker()) {
+				++active_workers;
+			} else {
+				LOG(ERROR) << "Failed to abort worker \"" << it->second->get_id() << "\".";
+				return false;
+			}
+		}
+	}
+	if (active_workers > 0) {
+		for (auto it = workers_.begin(); it != workers_.end(); ++it) {
+			if ((bool)it->second && it->second->joinable())
+				it->second->join();
+			it->first.reset();
+		}
+	}
+	LOG(INFO) << "All workers joined.";
+	return true;
+}
+
+bool
+hitsuji::hitsuji_t::AbortOneWorker()
+{
+	static const int version = 0;
+	int rc = zmq_msg_init_size (&zmq_msg_, MessageHeader::size() + Request::sbeBlockLength());
+	if (rc) {
+		LOG(ERROR) << "zmq_msg_init_size failed: " << zmq_strerror (zmq_errno());
+		return false;		}
+	sbe_hdr_->wrap (reinterpret_cast<char*> (zmq_msg_data (&zmq_msg_)), 0, version, static_cast<int> (zmq_msg_size (&zmq_msg_)))
+		.blockLength (Request::sbeBlockLength())
+		.templateId (Request::sbeTemplateId())
+		.schemaId (Request::sbeSchemaId())
+		.version (Request::sbeSchemaVersion());
+	sbe_request_->wrapForEncode (reinterpret_cast<char*> (zmq_msg_data (&zmq_msg_)), sbe_hdr_->size(), static_cast<int> (zmq_msg_size (&zmq_msg_)));
+	sbe_request_->flags().clear()
+		.abort (true);
+	rc = zmq_msg_send (&zmq_msg_, worker_request_sock_.get(), 0);
+	if (-1 == rc) {
+		LOG(ERROR) << "zmq_send failed: " << zmq_strerror (zmq_errno());
+		rc = zmq_msg_close (&zmq_msg_);
+		LOG_IF(ERROR, rc) << "zmq_msg_close failed: " << zmq_strerror (zmq_errno());
+		return false;
+	} else {
+		return true;
+	}
 }
 
 bool
@@ -304,10 +456,24 @@ hitsuji::hitsuji_t::Stop()
 void
 hitsuji::hitsuji_t::Reset()
 {
-/* Worker threads */
-	worker_.reset();
+/* Interrupt worker threads. */
+	if (!workers_.empty()) {
+		LOG(INFO) << "Reviewing workers.";
+		unsigned active_workers = 0;
+		for (auto it = workers_.begin(); it != workers_.end(); ++it)
+			if ((bool)it->second && it->second->joinable())
+				++active_workers;
+		if (active_workers > 0) {
+			LOG(INFO) << "Aborting " << active_workers << " workers.";
+			AbortWorkers();
+		} else {
+			LOG(INFO) << "All workers inactive.";
+		}
+	}
 	chromium::debug::LeakTracker<worker_t>::CheckForLeaks();
 /* Release ZMQ sockets before context */
+	CHECK (worker_request_sock_.use_count() <= 1);
+	worker_request_sock_.reset();
 	CHECK (worker_reply_sock_.use_count() <= 1);
 	worker_reply_sock_.reset();
 	CHECK (zmq_context_.use_count() <= 1);

@@ -19,13 +19,17 @@ static const std::string kEnumTypeDictionaryName ("RWFEnum");
 hitsuji::provider_t::provider_t (
 	const hitsuji::config_t& config,
 	std::shared_ptr<hitsuji::upa_t> upa,
-	hitsuji::client_t::Delegate* delegate 
+	hitsuji::provider_t::Delegate* reply_delegate,
+	SOCKET reply_sock,
+	hitsuji::client_t::Delegate* request_delegate 
 	) :
 	creation_time_ (boost::posix_time::second_clock::universal_time()),
 	last_activity_ (creation_time_),
 	config_ (config),
 	upa_ (upa),
-	delegate_ (delegate),
+	reply_delegate_ (reply_delegate),
+	reply_sock_ (reply_sock),
+	request_delegate_ (request_delegate),
 	rssl_sock_ (nullptr),
 	keep_running_ (true),
 	min_rwf_version_ (0),
@@ -330,6 +334,10 @@ hitsuji::provider_t::Run()
 	in_nfds_ = out_nfds_ = 0;
 	in_tv_.tv_sec = 0;
 	in_tv_.tv_usec = 1000 * 100;
+/* Add external reply socket */
+	if (INVALID_SOCKET != reply_sock_) {
+		FD_SET (reply_sock_, &in_rfds_);
+	}
 
 	for (;;) {
 		bool did_work = DoWork();
@@ -401,6 +409,15 @@ hitsuji::provider_t::DoWork()
 			}
 		}
 		return false;
+	}
+
+/* External socket event */
+	if (INVALID_SOCKET != reply_sock_ &&
+	    FD_ISSET (reply_sock_, &out_rfds_))
+	{
+		if (!reply_delegate_->OnRead())
+			FD_CLR (reply_sock_, &out_rfds_);
+		did_work = true;
 	}
 
 /* New client connection */
@@ -958,7 +975,7 @@ hitsuji::provider_t::AcceptClientSession (
 {
 	VLOG(2) << "Accepting new client session request: { \"Address\": \"" << address << "\" }";
 
-	auto client = std::make_shared<client_t> (shared_from_this(), delegate_, handle, address);
+	auto client = std::make_shared<client_t> (shared_from_this(), request_delegate_, handle, address);
 	if (!(bool)client || !client->Initialize()) {
 		cumulative_stats_[PROVIDER_PC_CLIENT_INIT_EXCEPTION]++;
 		LOG(ERROR) << "Client session initialisation failed, aborting connection.";

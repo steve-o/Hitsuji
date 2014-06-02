@@ -10,6 +10,9 @@
 /* Boost threading */
 #include <boost/thread.hpp>
 
+/* ZeroMQ messaging middleware. */
+#include <zmq.h>
+
 /* Velocity Analytics Plugin Framework */
 #include <vpf/vpf.h>
 
@@ -31,32 +34,35 @@ namespace hitsuji
 	class provider_t;
 	class MessageHeader;
 	class Request;
+	class Reply;
 
 	class worker_t
 	{
 	public:
-		explicit worker_t (std::shared_ptr<provider_t> provider);
+		explicit worker_t (std::shared_ptr<void>& zmq_context);
 		virtual ~worker_t();
-
-		bool Start();
-		void Stop();
 
 		bool Initialize();
 		void Reset();
 
+/* Run core event loop. */
+		void MainLoop();
+
 		bool OnTask (const void* buffer, size_t length);
 
 	private:
-/* Run core event loop. */
-		void MainLoop();
 /* Per thread workspace. */
 		bool AcquireFlexRecordCursor();
 
-/* UPA provider */
-		std::shared_ptr<provider_t> provider_;
+		bool SendReply (uintptr_t handle, int32_t token);
 
 /* unique id per worker for trace. */
 		std::string prefix_;
+
+/* ZMQ context. */
+		std::shared_ptr<void> zmq_context_;
+		std::shared_ptr<void> request_sock_;
+		std::shared_ptr<void> reply_sock_;
 
 /* As worker state: */
 /* Parsing state for requested items. */
@@ -66,9 +72,12 @@ namespace hitsuji
 		FlexRecDefinitionManager* manager_;
 		std::shared_ptr<FlexRecWorkAreaElement> work_area_;
 		std::shared_ptr<FlexRecViewElement> view_element_;
+/* ZMQ message */
+		zmq_msg_t zmq_msg_;
 /* Sbe message buffer */
 		std::shared_ptr<MessageHeader> sbe_hdr_;
-		std::shared_ptr<Request> sbe_msg_;
+		std::shared_ptr<Request> sbe_request_;
+		std::shared_ptr<Reply> sbe_reply_;
 		char sbe_buf_[MAX_MSG_SIZE];
 		size_t sbe_length_;
 /* Rssl message buffer */

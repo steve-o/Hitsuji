@@ -6,6 +6,7 @@
 #define HITSUJI_HH_
 
 #include <cstdint>
+#include <forward_list>
 #include <list>
 #include <memory>
 
@@ -15,12 +16,16 @@
 /* Boost threading */
 #include <boost/thread.hpp>
 
+/* ZeroMQ messaging middleware. */
+#include <zmq.h>
+
 /* Velocity Analytics Plugin Framework */
 #include <vpf/vpf.h>
 
 #include "googleurl/url_parse.h"
 #include "chromium/string_piece.hh"
 #include "client.hh"
+#include "provider.hh"
 #include "config.hh"
 
 /* Maximum encoded size of an RSSL provider to client message. */
@@ -34,11 +39,11 @@ namespace vta
 
 namespace hitsuji
 {
-	class provider_t;
 	class upa_t;
 	class worker_t;
 	class MessageHeader;
 	class Request;
+	class Reply;
 
 	class hitsuji_t
 /* Permit global weak pointer to application instance for shutdown notification. */
@@ -49,7 +54,8 @@ namespace hitsuji
 /* Tcl API interface. */
 		, public vpf::Command
 #endif
-		, public client_t::Delegate
+		, public client_t::Delegate	/* Rssl requests */
+		, public provider_t::Delegate	/* Worker replies */
 	{
 	public:
 		explicit hitsuji_t();
@@ -71,6 +77,7 @@ namespace hitsuji
 		void Quit();
 #endif
 		virtual bool OnRequest (uintptr_t handle, uint16_t rwf_version, int32_t token, uint16_t service_id, const std::string& item_name, bool use_attribinfo_in_updates) override;
+		virtual bool OnRead() override;
 
 		bool Initialize();
 		void Reset();
@@ -88,8 +95,15 @@ namespace hitsuji
 		bool Start();
 		void Stop();
 
+		bool AbortWorkers();
+		bool AbortOneWorker();
+
+		bool OnReply (const void* buffer, size_t length);
+
 /* Mainloop procesing thread. */
 		std::unique_ptr<boost::thread> event_thread_;
+/* Worker threads*/		
+		std::forward_list<std::pair<std::shared_ptr<worker_t>, std::shared_ptr<boost::thread>>> workers_;
 
 /* Asynchronous shutdown notification mechanism. */
 		boost::condition_variable mainloop_cond_;
@@ -108,17 +122,16 @@ namespace hitsuji
 		std::shared_ptr<upa_t> upa_;
 /* UPA provider */
 		std::shared_ptr<provider_t> provider_;
-/* Worker threads */
-		std::shared_ptr<worker_t> worker_;
 /* ZMQ context. */
 		std::shared_ptr<void> zmq_context_;
-		std::shared_ptr<void> worker_abort_sock_;
+		std::shared_ptr<void> worker_request_sock_;
 		std::shared_ptr<void> worker_reply_sock_;
+/* ZMQ message */
+		zmq_msg_t zmq_msg_;
 /* Sbe message buffer */
 		std::shared_ptr<MessageHeader> sbe_hdr_;
-		std::shared_ptr<Request> sbe_msg_;
-		char sbe_buf_[MAX_MSG_SIZE];
-		size_t sbe_length_;
+		std::shared_ptr<Request> sbe_request_;
+		std::shared_ptr<Reply> sbe_reply_;
 	};
 
 } /* namespace hitsuji */

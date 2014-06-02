@@ -1144,7 +1144,7 @@ hitsuji::client_t::SendClose (
 		", \"StatusCode\": " << rsslStateCodeToString (status_code) << ""
 		", \"StatusText\": \"" << status_text << "\""
 		" }";
-	if (!provider_->WriteRawClose (rwf_version(), request_token, service_id, model_type, item_name, use_attribinfo_in_updates, stream_state, status_code, status_text, buf->data, &rssl_length)) {
+	if (!provider_t::WriteRawClose (rwf_version(), request_token, service_id, model_type, item_name, use_attribinfo_in_updates, stream_state, status_code, status_text, buf->data, &rssl_length)) {
 		goto cleanup;
 	}
 	buf->length = static_cast<uint32_t> (rssl_length);

@@ -124,38 +124,64 @@ hitsuji::provider_t::Close()
 	RsslError rssl_err;
 	RsslRet rc;
 
-/* Prevent new applications from connecting by closing listening socket first. */
-	if (nullptr != rssl_sock_) {
-		RsslServerInfo server_info;
-		RsslError rssl_err;
-		VLOG(3) << "Closing RSSL server socket.";
-		VLOG_IF(3, RSSL_RET_SUCCESS == rsslGetServerInfo (rssl_sock_, &server_info, &rssl_err))
-			<< "RSSL server summary: {"
-			 " \"currentBufferUsage\": " << server_info.currentBufferUsage << ""
-			", \"peakBufferUsage\": " << server_info.peakBufferUsage << ""
-			" }";
-		if (RSSL_RET_SUCCESS != rsslCloseServer (rssl_sock_, &rssl_err)) {
-			LOG(ERROR) << "rsslCloseServer: { "
-				  "\"rsslErrorId\": " << rssl_err.rsslErrorId << ""
-				", \"sysError\": " << rssl_err.sysError << ""
-				", \"text\": \"" << rssl_err.text << "\""
-				" }";
-		}
-		rssl_sock_ = nullptr;
+/* Prevent new applications from connecting. */
+	is_accepting_connections_ = false;
+
+/* clients: five pass strategy */
+/* 1) Disable new requests via source directory update */
+	is_accepting_requests_ = false;
+	VLOG_IF(3, clients_.size() > 0) << "Updating source directory image, provider is not accepting new requests.";
+	for (auto it = clients_.begin(); it != clients_.end(); ++it) {
+		auto client = it->second;
+		client->OnSourceDirectoryUpdate();
 	}
 
-	boost::lock_guard<boost::shared_mutex> lock (clients_lock_);
-/* clients: three pass strategy */
+/* 2) IFF tokens, pump messages until empty. */
+	if (nullptr != rssl_sock_ && !clients_.empty())
+	{
+		FD_ZERO (&in_rfds_); FD_SET (rssl_sock_->socketId, &in_rfds_);
+		FD_ZERO (&in_wfds_);
+		FD_ZERO (&in_efds_);
+		in_nfds_ = out_nfds_ = 0;
+		in_tv_.tv_sec = 0;
+		in_tv_.tv_usec = 1000 * 100;
+		if (INVALID_SOCKET != reply_sock_) {
+			FD_SET (reply_sock_, &in_rfds_);
+		}
+
+		for (;;) {
+			bool did_work = DoWork();
+
+			size_t active_tokens = 0;
+			for (auto it = clients_.begin(); it != clients_.end(); ++it) {
+				auto client = it->second;
+				active_tokens += client->tokens().size();
+			}
+			if (0 == active_tokens) {
+				break;
+			} else {
+				VLOG(3) << "Waiting on " << active_tokens << " active tokens in " << clients_.size() << " active clients.";
+			}
+
+			if (did_work)
+				continue;
+
+			out_rfds_ = in_rfds_;
+			out_wfds_ = in_wfds_;
+			out_efds_ = in_efds_;
+			out_tv_.tv_sec = in_tv_.tv_sec;
+			out_tv_.tv_usec = in_tv_.tv_usec;
+
+			out_nfds_ = select (in_nfds_ + 1, &out_rfds_, &out_wfds_, &out_efds_, &out_tv_);
+		}
+	}
+
+/* 3) Send session close notification */
 	VLOG_IF(3, clients_.size() > 0) << "Closing " << clients_.size() << " client sessions.";
-/* 1) send close notification */
 	for (auto it = clients_.begin(); it != clients_.end(); ++it) {
 		auto client = it->second;
 		client->Close();
-	}
-/* 2) flush message stream */
-	for (auto it = clients_.begin(); it != clients_.end(); ++it)
-	{
-		auto client = it->second;
+/* 4) Flush message stream */
 		RsslChannel* c = client->handle();
 /* channel still open */
 		if ((RSSL_CH_STATE_ACTIVE == c->state) &&
@@ -184,8 +210,28 @@ hitsuji::provider_t::Close()
 			}
 		}
 	}
-/* 3) cleanup */
+/* 5) Cleanup */
 	clients_.clear();
+
+/* Closing listening socket. */
+	if (nullptr != rssl_sock_) {
+		RsslServerInfo server_info;
+		RsslError rssl_err;
+		VLOG(3) << "Closing RSSL server socket.";
+		VLOG_IF(3, RSSL_RET_SUCCESS == rsslGetServerInfo (rssl_sock_, &server_info, &rssl_err))
+			<< "RSSL server summary: {"
+			 " \"currentBufferUsage\": " << server_info.currentBufferUsage << ""
+			", \"peakBufferUsage\": " << server_info.peakBufferUsage << ""
+			" }";
+		if (RSSL_RET_SUCCESS != rsslCloseServer (rssl_sock_, &rssl_err)) {
+			LOG(ERROR) << "rsslCloseServer: { "
+				  "\"rsslErrorId\": " << rssl_err.rsslErrorId << ""
+				", \"sysError\": " << rssl_err.sysError << ""
+				", \"text\": \"" << rssl_err.text << "\""
+				" }";
+		}
+		rssl_sock_ = nullptr;
+	}
 
 /* Close all RSSL client connections. */
 	VLOG_IF(3, connections_.size() > 0) << "Closing " << connections_.size() << " client connections.";
@@ -193,6 +239,7 @@ hitsuji::provider_t::Close()
 		Close (*it);
 	}
 	connections_.clear();
+	VLOG(3) << "Provider closed.";
 }
 
 bool

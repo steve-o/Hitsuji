@@ -276,6 +276,14 @@ hitsuji::hitsuji_t::OnRequest (
 	bool use_attribinfo_in_updates
 	)
 {
+	DVLOG(3) << "Request: { "
+		  "\"handle\": " << handle << ""
+		", \"rwf_version\": " << rwf_version << ""
+		", \"token\": " << token << ""
+		", \"service_id\": " << service_id << ""
+		", \"item_name\": \"" << item_name << "\""
+		", \"use_attribinfo_in_updates\": " << (use_attribinfo_in_updates ? "true" : "false") << ""
+		" }";
 /* distribute to worker */
 	static const int version = 0;
 	int rc = zmq_msg_init_size (&zmq_msg_, MessageHeader::size() + Request::sbeBlockLength() + Request::itemNameHeaderSize() + item_name.size());
@@ -317,8 +325,12 @@ hitsuji::hitsuji_t::OnReply (
 	static const int version = 0;
 	sbe_hdr_->wrap (reinterpret_cast<char*> (const_cast<void*> (buffer)), 0, version, static_cast<int> (length));
 	sbe_reply_->wrapForDecode (reinterpret_cast<char*> (const_cast<void*> (buffer)), sbe_hdr_->size(), sbe_hdr_->blockLength(), sbe_hdr_->version(), static_cast<int> (length));
-	const uintptr_t handle = sbe_request_->handle();
-	const int32_t token = sbe_request_->token();
+	const uintptr_t handle = sbe_reply_->handle();
+	const int32_t token = sbe_reply_->token();
+	DVLOG(3) << "Reply: { "
+		  "\"handle\": " << handle << ""
+		", \"token\": " << token << ""
+		" }";
 	return provider_->SendReply (reinterpret_cast<RsslChannel*> (handle), token, sbe_reply_->rsslBuffer(), sbe_reply_->rsslBufferLength());
 }
 
@@ -464,7 +476,7 @@ hitsuji::hitsuji_t::Reset()
 			if ((bool)it->second && it->second->joinable())
 				++active_workers;
 		if (active_workers > 0) {
-			LOG(INFO) << "Aborting " << active_workers << " workers.";
+			LOG(INFO) << active_workers << " workers to abort.";
 			AbortWorkers();
 		} else {
 			LOG(INFO) << "All workers inactive.";

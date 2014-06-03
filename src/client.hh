@@ -94,6 +94,7 @@ namespace hitsuji
 		bool Initialize();
 		bool Close();
 
+		bool OnSourceDirectoryUpdate();
 		bool SendReply (int32_t token, const void* data, size_t length);
 
 /* RSSL client socket */
@@ -108,6 +109,9 @@ namespace hitsuji
 		}
 		uint16_t rwf_version() const {
 			return (rwf_major_version() * 256) + rwf_minor_version();
+		}
+		const std::unordered_set<int32_t>& tokens() const {
+			return tokens_;
 		}
 
 	private:
@@ -125,7 +129,8 @@ namespace hitsuji
 		bool RejectLogin (const RsslRequestMsg* msg, int32_t login_token);
 		bool AcceptLogin (const RsslRequestMsg* msg, int32_t login_token);
 
-		bool SendDirectoryResponse (int32_t token, const char* service_name, uint32_t filter_mask);
+		bool SendDirectoryRefresh (int32_t token, const char* service_name, uint32_t filter_mask);
+		bool SendDirectoryUpdate (int32_t token, const char* service_name);
 		bool SendClose (int32_t token, uint16_t service_id, uint8_t model_type, const chromium::StringPiece& item_name, bool use_attribinfo_in_updates, uint8_t stream_state, uint8_t status_code, const chromium::StringPiece& status_text);
 		int Submit (RsslBuffer* buf);
 
@@ -168,9 +173,9 @@ namespace hitsuji
 
 /* Watchlist of all items. */
 		std::unordered_set<int32_t> tokens_;
-
 /* Item requests may appear before login success has been granted. */
 		bool is_logged_in_;
+		int32_t directory_token_;
 		int32_t login_token_;
 /* RSSL keepalive state. */
 		boost::posix_time::ptime next_ping_;

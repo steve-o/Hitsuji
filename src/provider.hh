@@ -186,8 +186,7 @@ namespace hitsuji
 
 /* Directory mapped ServiceID */
 		boost::atomic_uint16_t service_id_;
-/* TREP-RT can reject new client requests whilst maintaining current connected sessions.
- */
+/* TREP-RT can reject new client requests whilst maintaining current connected sessions. */
 		bool is_accepting_connections_;
 		bool is_accepting_requests_;
 

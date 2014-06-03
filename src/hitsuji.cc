@@ -242,16 +242,18 @@ hitsuji::hitsuji_t::Initialize()
 	}
 	try {
 /* Worker threads */
-		auto worker = std::make_shared<worker_t> (zmq_context_);
-		if (!(bool)worker)
-			goto cleanup;
-		auto thread = std::make_shared<boost::thread> ([worker](){
-			if (worker->Initialize())
-				worker->MainLoop();
-		});
-		if (!(bool)thread)
-			goto cleanup;
-		workers_.emplace_front (std::make_pair (worker, thread));
+		for (size_t i = 0; i < config_.worker_count; ++i) {
+			auto worker = std::make_shared<worker_t> (zmq_context_);
+			if (!(bool)worker)
+				goto cleanup;
+			auto thread = std::make_shared<boost::thread> ([worker](){
+				if (worker->Initialize())
+					worker->MainLoop();
+			});
+			if (!(bool)thread)
+				goto cleanup;
+			workers_.emplace_front (std::make_pair (worker, thread));
+		}
 	} catch (const std::exception& e) {
 		LOG(ERROR) << "Worker::Initialisation exception: { "
 			"\"What\": \"" << e.what() << "\""

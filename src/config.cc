@@ -12,7 +12,7 @@ hitsuji::config_t::config_t() :
 	vendor_name ("Thomson Reuters"),
 	maximum_data_size (64 * 1024),
 	session_capacity (8),
-	worker_count (2)
+	worker_count (6)
 {
 /* C++11 initializer lists not supported in MSVC2010 */
 }

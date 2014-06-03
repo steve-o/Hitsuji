@@ -42,7 +42,7 @@ namespace hitsuji
 		explicit worker_t (std::shared_ptr<void>& zmq_context);
 		virtual ~worker_t();
 
-		bool Initialize();
+		bool Initialize (size_t id);
 		void Reset();
 
 /* Run core event loop. */

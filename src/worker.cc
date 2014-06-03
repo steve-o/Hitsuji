@@ -43,10 +43,49 @@ hitsuji::worker_t::~worker_t()
 }
 
 bool
-hitsuji::worker_t::Initialize()
+hitsuji::worker_t::Initialize (size_t id)
 {
+/* Set thread affinity to this thread */
+	DWORD_PTR default_mask;
+	DWORD_PTR system_mask;
+	if (GetProcessAffinityMask (GetCurrentProcess(), &default_mask, &system_mask)) {
+		DWORD_PTR current_mask = 1;
+		for (size_t i = 0; i < id; ++i) {
+			const DWORD_PTR old_mask = current_mask;
+			current_mask <<= 1;
+			while ((current_mask & default_mask) == 0) {
+				current_mask <<= 1;
+				if (!current_mask) {
+					current_mask = 1;
+				}
+				if (current_mask == old_mask) {
+					break;
+				}
+			}
+		}
+		if (0 == SetThreadAffinityMask (GetCurrentThread(), current_mask)) {
+			LPVOID lpMsgBuf;
+			const DWORD dw = GetLastError();
+			FormatMessage (
+				FORMAT_MESSAGE_ALLOCATE_BUFFER | 
+				    FORMAT_MESSAGE_FROM_SYSTEM |
+				    FORMAT_MESSAGE_IGNORE_INSERTS,
+				NULL,
+				dw,
+				MAKELANGID (LANG_NEUTRAL, SUBLANG_DEFAULT),
+				(LPTSTR)&lpMsgBuf,
+				0, NULL);
+			LOG(ERROR) << "Failed to set thread affinity mask: " << static_cast<const char*> (lpMsgBuf);
+			LocalFree (lpMsgBuf);
+		} else {
+			SetThreadPriority (GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
+		}
+	}
+
 	LOG(INFO) << "Worker thread: { "
-		  "\"id\": \"" << boost::this_thread::get_id() << "\""
+		    "\"id\":" << id << ""
+		  ", \"boost::id\": \"" << boost::this_thread::get_id() << "\""
+		  ", \"processor\": " << GetCurrentProcessorNumber() << ""
 		" }";
 
 /* Set logger ID */

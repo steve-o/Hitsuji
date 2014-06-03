@@ -246,8 +246,8 @@ hitsuji::hitsuji_t::Initialize()
 			auto worker = std::make_shared<worker_t> (zmq_context_);
 			if (!(bool)worker)
 				goto cleanup;
-			auto thread = std::make_shared<boost::thread> ([worker](){
-				if (worker->Initialize())
+			auto thread = std::make_shared<boost::thread> ([worker, i](){
+				if (worker->Initialize (i))
 					worker->MainLoop();
 			});
 			if (!(bool)thread)

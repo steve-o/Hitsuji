@@ -68,6 +68,7 @@ namespace hitsuji
 /* Parsing state for requested items. */
 		std::string url_;
 		std::string underlying_symbol_;
+		std::string dacs_lock_;
 /* FlexRecord cursor */
 		FlexRecDefinitionManager* manager_;
 		std::shared_ptr<FlexRecWorkAreaElement> work_area_;

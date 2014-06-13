@@ -34,7 +34,7 @@ namespace vta
 		virtual bool ParseRequest (const chromium::StringPiece& url, const url_parse::Component& parsed_query) = 0;
 		virtual bool Calculate (const chromium::StringPiece& symbol_name) = 0;
 		virtual bool Calculate (const TBSymbolHandle& handle, FlexRecWorkAreaElement* work_area, FlexRecViewElement* view_element) = 0;
-		virtual bool WriteRaw (uint16_t rwf_version, int32_t token, uint16_t service_id, const chromium::StringPiece& item_name, void* data, size_t* length) = 0;
+		virtual bool WriteRaw (uint16_t rwf_version, int32_t token, uint16_t service_id, const chromium::StringPiece& item_name, const chromium::StringPiece& dacs_lock, void* data, size_t* length) = 0;
 		virtual void Reset() = 0;
 
 	protected:

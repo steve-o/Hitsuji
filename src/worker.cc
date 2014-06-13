@@ -23,6 +23,7 @@
 #include "hitsuji/Reply.hpp"
 #pragma warning(pop)
 
+#include "permdata.hh"
 #include "vta_bar.hh"
 #include "vta_test.hh"
 
@@ -84,7 +85,7 @@ hitsuji::worker_t::Initialize (size_t id)
 
 	LOG(INFO) << "Worker thread: { "
 		    "\"id\":" << id << ""
-		  ", \"boost::id\": \"" << boost::this_thread::get_id() << "\""
+		  ", \"boost::thread::id\": \"" << boost::this_thread::get_id() << "\""
 		  ", \"processor\": " << GetCurrentProcessorNumber() << ""
 		" }";
 
@@ -258,9 +259,17 @@ hitsuji::worker_t::OnTask (
 			return false;
 		}
 		goto send_reply;
-	}	
-/* Fake asynchronous operation */
-	if (!vta_bar_->Calculate (underlying_symbol_.c_str())) {
+	}
+/* Fetch DACS lock from PermData FlexRecord history: string is cleared. */
+	{
+	auto permdata = std::make_shared<vhayu::permdata_t> ();
+	if (!permdata->GetDacsLock (underlying_symbol_, &dacs_lock_)) {
+/* underlying API only ever returns 1. */
+		NOTIMPLEMENTED();
+	}
+	}
+/* Execute analytic */
+	if (!vta_bar_->Calculate (underlying_symbol_)) {
 //	if (!vta_bar_->Calculate (TBPrimitives::GetSymbolHandle (underlying_symbol_.c_str(), 1), work_area_.get(), view_element_.get())) {
 		if (!provider_t::WriteRawClose (
 				rwf_version,
@@ -279,7 +288,7 @@ hitsuji::worker_t::OnTask (
 		goto send_reply;
 	}
 /* Response message with analytic payload */
-	if (!vta_bar_->WriteRaw (rwf_version, token, service_id, item_name, rssl_buf_, &rssl_length_)) {
+	if (!vta_bar_->WriteRaw (rwf_version, token, service_id, item_name, dacs_lock_, rssl_buf_, &rssl_length_)) {
 /* Extremely unlikely situation that writing the response fails but writing a close will not */
 		if (!provider_t::WriteRawClose (
 				rwf_version,

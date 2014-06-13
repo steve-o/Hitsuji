@@ -237,6 +237,7 @@ set(cxx-sources
 	src/config.cc
 	src/hitsuji.cc
 	src/main.cc
+	src/permdata.cc
 	src/plugin.cc
 	src/provider.cc
 	src/upa.cc

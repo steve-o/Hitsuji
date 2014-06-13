@@ -81,6 +81,7 @@ vta::test_t::WriteRaw (
 	int32_t token,
 	uint16_t service_id,
 	const chromium::StringPiece& item_name,
+	const chromium::StringPiece& dacs_lock,	    /* ignore DACS lock */
 	void* data,
 	size_t* length
 	)

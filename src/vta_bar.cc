@@ -205,6 +205,7 @@ vta::bar_t::WriteRaw (
 	int32_t token,
 	uint16_t service_id,
 	const chromium::StringPiece& item_name,
+	const chromium::StringPiece& dacs_lock,
 	void* data,
 	size_t* length
 	)
@@ -242,6 +243,13 @@ vta::bar_t::WriteRaw (
 	response.flags |= RSSL_RFMF_HAS_MSG_KEY;
 /* Set the request token. */
 	response.msgBase.streamId = token;
+
+/* DACS permission data, if provided */
+	if (!dacs_lock.empty()) {
+		response.permData.data = const_cast<char*> (dacs_lock.data());
+		response.permData.length = static_cast<uint32_t> (dacs_lock.size());
+		response.flags |= RSSL_RFMF_HAS_PERM_DATA;
+	}
 
 /** Optional: but require to replace stale values in cache when stale values are supported. **/
 /* Item interaction state: Open, Closed, ClosedRecover, Redirected, NonStreaming, or Unspecified. */

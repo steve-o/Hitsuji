@@ -29,12 +29,14 @@
 
 static const std::string kErrorMalformedRequest = "Malformed request.";
 static const std::string kErrorNotFound = "Not found in SearchEngine.";
+static const std::string kErrorPermData = "Unable to retrieve permission data for item.";
 static const std::string kErrorInternal = "Internal error.";
 
 hitsuji::worker_t::worker_t (
 	std::shared_ptr<void>& zmq_context
 	)
 	: zmq_context_ (zmq_context)
+	, permdata_ (std::make_shared<vhayu::permdata_t> ())
 	, manager_ (nullptr)
 {
 }
@@ -260,17 +262,29 @@ hitsuji::worker_t::OnTask (
 		}
 		goto send_reply;
 	}
+	auto symbol_handle = TBPrimitives::GetSymbolHandle (underlying_symbol_.c_str(), 1);
 /* Fetch DACS lock from PermData FlexRecord history: string is cleared. */
-	{
-	auto permdata = std::make_shared<vhayu::permdata_t> ();
-	if (!permdata->GetDacsLock (underlying_symbol_, &dacs_lock_)) {
-/* underlying API only ever returns 1. */
-		NOTIMPLEMENTED();
-	}
+//	if (!permdata_->GetDacsLock (underlying_symbol_, &dacs_lock_)) {
+	if (!permdata_->GetDacsLock (symbol_handle, work_area_.get(), view_element_.get(), &dacs_lock_)) {
+		if (!provider_t::WriteRawClose (
+				rwf_version,
+				token,
+				service_id,
+				RSSL_DMT_MARKET_PRICE,
+				item_name,
+				use_attribinfo_in_updates,
+				RSSL_STREAM_CLOSED, RSSL_SC_NOT_ENTITLED, kErrorPermData,
+				rssl_buf_,
+				&rssl_length_
+				))
+		{
+			return false;
+		}
+		goto send_reply;
 	}
 /* Execute analytic */
-	if (!vta_bar_->Calculate (underlying_symbol_)) {
-//	if (!vta_bar_->Calculate (TBPrimitives::GetSymbolHandle (underlying_symbol_.c_str(), 1), work_area_.get(), view_element_.get())) {
+//	if (!vta_bar_->Calculate (underlying_symbol_)) {
+	if (!vta_bar_->Calculate (symbol_handle, work_area_.get(), view_element_.get())) {
 		if (!provider_t::WriteRawClose (
 				rwf_version,
 				token,

@@ -92,6 +92,9 @@ vhayu::permdata_t::GetDacsLock (
 #ifndef CONFIG_AS_APPLICATION
 /* Time period */
 	static const __time32_t from = 86400 * 2;  /* magic numbers */
+/*   Unable to deblob.  Data get error: -1000024
+ *   DataInfo: symbol:<MSFT.O>  time: 1383782467  num: 331  len: 36
+ */
 	static const __time32_t till = INT32_MAX - 4;
 
 	DVLOG(4) << "from: " << from << " till: " << till;
@@ -99,7 +102,7 @@ vhayu::permdata_t::GetDacsLock (
 		U64 numRecs = FlexRecPrimitives::GetFlexRecords (
 							handle, 
 							const_cast<char*> (kPermDataRecord),
-							from, till, kDirectionNewToOld /* backward */,
+							till, from, kDirectionNewToOld /* backward */,
 							1 /* limit */,
 							view_element->view,
 							work_area->data,

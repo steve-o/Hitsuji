@@ -29,6 +29,11 @@ namespace vta
 	class test_t;
 }
 
+namespace vhayu
+{
+	class permdata_t;
+}
+
 namespace hitsuji
 {
 	class provider_t;
@@ -63,11 +68,12 @@ namespace hitsuji
 		std::shared_ptr<void> zmq_context_;
 		std::shared_ptr<void> request_sock_;
 		std::shared_ptr<void> reply_sock_;
-
 /* As worker state: */
 /* Parsing state for requested items. */
 		std::string url_;
 		std::string underlying_symbol_;
+/* Permission data */
+		std::shared_ptr<vhayu::permdata_t> permdata_;
 		std::string dacs_lock_;
 /* FlexRecord cursor */
 		FlexRecDefinitionManager* manager_;

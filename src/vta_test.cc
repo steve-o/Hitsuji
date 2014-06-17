@@ -430,6 +430,7 @@ vta::test_t::WriteRaw (
 			LOG(INFO) << prefix_ << "rsslValidateMsg succeeded.";
 		}
 	}
+	*length = static_cast<size_t> (buf.length);
 	return true;
 }
 

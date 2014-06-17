@@ -243,6 +243,7 @@ set(cxx-sources
 	src/upa.cc
 	src/upaostream.cc
 	src/vta_bar.cc
+	src/vta_rollup_bar.cc
 	src/vta_test.cc
 	src/worker.cc
 	src/chrome/common/json_schema_constants.cc

@@ -1197,8 +1197,11 @@ hitsuji::provider_t::GetServiceFilterList (
 /* Determine entry count for encoder hinting */
 	const bool use_info_filter  = (0 != (filter_mask & RDM_DIRECTORY_SERVICE_INFO_FILTER));
 	const bool use_state_filter = (0 != (filter_mask & RDM_DIRECTORY_SERVICE_STATE_FILTER));
-	const unsigned filter_count = (use_info_filter ? 1 : 0) + (use_state_filter ? 1 : 0);
-	
+	const bool use_load_filter  = (0 != (filter_mask & RDM_DIRECTORY_SERVICE_LOAD_FILTER));
+	const unsigned filter_count = (use_info_filter ? 1 : 0) 
+				    + (use_state_filter ? 1 : 0)
+				    + (use_load_filter ? 1 : 0);
+
 /* 5.3.8 Encoding with a SingleWriteIterator
  * Re-use of SingleWriteIterator permitted cross MapEntry and FieldList.
  */
@@ -1274,6 +1277,40 @@ hitsuji::provider_t::GetServiceFilterList (
 		}
 		if (!GetServiceState (it)) {
 			LOG(ERROR) << "GetServiceState failed.";
+			return false;
+		}
+		rc = rsslEncodeFilterEntryComplete (it, RSSL_TRUE /* commit */);
+		if (RSSL_RET_SUCCESS != rc) {
+			LOG(ERROR) << "rsslEncodeFilterEntryComplete: { "
+				  "\"returnCode\": " << static_cast<signed> (rc) << ""
+				", \"enumeration\": \"" << rsslRetCodeToString (rc) << "\""
+				", \"text\": \"" << rsslRetCodeInfo (rc) << "\""
+				" }";
+			return false;
+		}
+	}
+	if (use_load_filter) {
+#ifndef NDEBUG
+		RsslFilterEntry filter_entry = RSSL_INIT_FILTER_ENTRY;
+#else
+		RsslFilterEntry filter_entry;
+		rsslClearFilterEntry (&filter_entry);
+#endif
+		filter_entry.id      = RDM_DIRECTORY_SERVICE_LOAD_ID;
+		filter_entry.action  = RSSL_FTEA_SET_ENTRY;
+		rc = rsslEncodeFilterEntryInit (it, &filter_entry, 0 /* size */);
+		if (RSSL_RET_SUCCESS != rc) {
+			LOG(ERROR) << "rsslEncodeFilterEntryInit: { "
+				  "\"returnCode\": " << static_cast<signed> (rc) << ""
+				", \"enumeration\": \"" << rsslRetCodeToString (rc) << "\""
+				", \"text\": \"" << rsslRetCodeInfo (rc) << "\""
+				", \"id\": \"" << internal::filter_entry_id_string (static_cast<RDMDirectoryServiceFilterIds> (filter_entry.id)) << "\""
+				", \"action\": \"" << internal::filter_entry_action_string (static_cast<RsslFilterEntryActions> (filter_entry.action)) << "\""
+				" }";
+			return false;
+		}
+		if (!GetServiceLoad (it)) {
+			LOG(ERROR) << "GetServiceLoad failed.";
 			return false;
 		}
 		rc = rsslEncodeFilterEntryComplete (it, RSSL_TRUE /* commit */);
@@ -1450,6 +1487,46 @@ hitsuji::provider_t::GetServiceInformation (
 			  "\"returnCode\": " << static_cast<signed> (rc) << ""
 			", \"enumeration\": \"" << rsslRetCodeToString (rc) << "\""
 			", \"text\": \"" << rsslRetCodeInfo (rc) << "\""
+			" }";
+		return false;
+	}
+
+/* SupportsOutOfBandSnapshots<Unsigned>
+ * Indicates whether Snapshot requests can be made even when the 
+ * OpenLimit has been reached.
+ */
+	element.name       = RSSL_ENAME_SUPPS_OOB_SNAPSHOTS;
+	element.dataType   = RSSL_DT_UINT;
+	static const uint64_t supports_oob_snapshots = 0;
+	rc = rsslEncodeElementEntry (it, &element, &supports_oob_snapshots);
+	if (RSSL_RET_SUCCESS != rc) {
+		LOG(ERROR) << "rsslEncodeElementEntry: { "
+			  "\"returnCode\": " << static_cast<signed> (rc) << ""
+			", \"enumeration\": \"" << rsslRetCodeToString (rc) << "\""
+			", \"text\": \"" << rsslRetCodeInfo (rc) << "\""
+			", \"name\": \"RSSL_ENAME_SUPPS_OOB_SNAPSHOTS\""
+			", \"dataType\": \"" << rsslDataTypeToString (element.dataType) << "\""
+			", \"supportsOobSnapshots\": " << supports_oob_snapshots << ""
+			" }";
+		return false;
+	}
+
+/* AcceptingConsumerStatus<Unsigned>
+ * Indicates whether a service can accept and process messages related 
+ * to Source Mirroring
+ */
+	element.name       = RSSL_ENAME_ACCEPTING_CONS_STATUS;
+	element.dataType   = RSSL_DT_UINT;
+	static const uint64_t accepts_consumer_status = 0;
+	rc = rsslEncodeElementEntry (it, &element, &accepts_consumer_status);
+	if (RSSL_RET_SUCCESS != rc) {
+		LOG(ERROR) << "rsslEncodeElementEntry: { "
+			  "\"returnCode\": " << static_cast<signed> (rc) << ""
+			", \"enumeration\": \"" << rsslRetCodeToString (rc) << "\""
+			", \"text\": \"" << rsslRetCodeInfo (rc) << "\""
+			", \"name\": \"RSSL_ENAME_ACCEPTING_CONS_STATUS\""
+			", \"dataType\": \"" << rsslDataTypeToString (element.dataType) << "\""
+			", \"acceptsConsumerStatus\": " << accepts_consumer_status << ""
 			" }";
 		return false;
 	}
@@ -1739,6 +1816,71 @@ hitsuji::provider_t::GetServiceState (
 			", \"name\": \"RSSL_ENAME_ACCEPTING_REQS\""
 			", \"dataType\": \"" << rsslDataTypeToString (element.dataType) << "\""
 			", \"isAcceptingRequests\": " << is_accepting_requests_ << ""
+			" }";
+		return false;
+	}
+
+	rc = rsslEncodeElementListComplete (it, RSSL_TRUE /* commit */);
+	if (RSSL_RET_SUCCESS != rc) {
+		LOG(ERROR) << "rsslEncodeElementListComplete failed: { "
+			  "\"returnCode\": " << static_cast<signed> (rc) << ""
+			", \"enumeration\": \"" << rsslRetCodeToString (rc) << "\""
+			", \"text\": \"" << rsslRetCodeInfo (rc) << "\""
+			" }";
+		return false;
+	}
+	return true;
+}
+
+/* SERVICE_LOAD_ID
+ * Load information of a service.
+ */
+bool
+hitsuji::provider_t::GetServiceLoad (
+	RsslEncodeIterator*const it
+	)
+{
+#ifndef NDEBUG
+	RsslElementList	element_list = RSSL_INIT_ELEMENT_LIST;
+	RsslElementEntry element = RSSL_INIT_ELEMENT_ENTRY;
+#else
+	RsslElementList	element_list;
+	RsslElementEntry element;
+	rsslClearElementList (&element_list);
+	rsslClearElementEntry (&element);
+#endif
+	RsslRet rc;
+
+	DCHECK(nullptr != it);
+
+	element_list.flags = RSSL_ELF_HAS_STANDARD_DATA;
+	rc = rsslEncodeElementListInit (it, &element_list, nullptr /* no dictionary */, 0 /* maximum size */);
+	if (RSSL_RET_SUCCESS != rc) {
+		LOG(ERROR) << "rsslEncodeElementListInit failed: { "
+			  "\"returnCode\": " << static_cast<signed> (rc) << ""
+			", \"enumeration\": \"" << rsslRetCodeToString (rc) << "\""
+			", \"text\": \"" << rsslRetCodeInfo (rc) << "\""
+			", \"flags\": \"RSSL_ELF_HAS_STANDARD_DATA\""
+			" }";
+		return false;
+	}
+
+/* OpenWindow<UInt>
+ * Maximum number of outstanding requests (i.e. requests for items not yet open) that 
+ * the service will allow at any given time.
+ */
+	element.name       = RSSL_ENAME_OPEN_WINDOW;
+	element.dataType   = RSSL_DT_UINT;
+	static const uint64_t open_window = 1000;   /* ZMQ_SNDHWM */
+	rc = rsslEncodeElementEntry (it, &element, &open_window);
+	if (RSSL_RET_SUCCESS != rc) {
+		LOG(ERROR) << "rsslEncodeElementEntry failed: { "
+			  "\"returnCode\": " << static_cast<signed> (rc) << ""
+			", \"enumeration\": \"" << rsslRetCodeToString (rc) << "\""
+			", \"text\": \"" << rsslRetCodeInfo (rc) << "\""
+			", \"name\": \"RSSL_ENAME_OPEN_WINDOW\""
+			", \"dataType\": \"" << rsslDataTypeToString (element.dataType) << "\""
+			", \"openWindow\": " << open_window << ""
 			" }";
 		return false;
 	}

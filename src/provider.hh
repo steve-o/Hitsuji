@@ -144,6 +144,7 @@ namespace hitsuji
 		bool GetServiceDictionaries (RsslEncodeIterator*const it);
 		bool GetServiceQoS (RsslEncodeIterator*const it);
 		bool GetServiceState (RsslEncodeIterator*const it);
+		bool GetServiceLoad (RsslEncodeIterator*const it);
 
 		int Submit (RsslChannel* c, RsslBuffer* buf);
 		int Ping (RsslChannel* c);

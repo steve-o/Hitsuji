@@ -26,6 +26,7 @@
 namespace vta
 {
 	class bar_t;
+	class rollup_bar_t;
 	class test_t;
 }
 
@@ -90,8 +91,9 @@ namespace hitsuji
 /* Rssl message buffer */
 		char rssl_buf_[MAX_MSG_SIZE];
 		size_t rssl_length_;
-/* Analytics*/
+/* Analytics */
 		std::shared_ptr<vta::bar_t> vta_bar_;
+		std::shared_ptr<vta::rollup_bar_t> vta_rollup_bar_;
 		std::shared_ptr<vta::test_t> vta_test_;
 
 		chromium::debug::LeakTracker<worker_t> leak_tracker_;

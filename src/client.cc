@@ -543,8 +543,8 @@ hitsuji::client_t::AcceptLogin (
 		goto cleanup;
 	}
 
-/* Images and & updates could be stale. */
-	static const uint64_t allow_suspect_data = 1;
+/* Images and & updates cannot be stale. */
+	static const uint64_t allow_suspect_data = 0;
 	element_entry.dataType	= RSSL_DT_UINT;
 	element_entry.name	= RSSL_ENAME_ALLOW_SUSPECT_DATA;
 	rc = rsslEncodeElementEntry (&it, &element_entry, &allow_suspect_data);
@@ -559,8 +559,8 @@ hitsuji::client_t::AcceptLogin (
 			" }";
 		return false;
 	}
-/* No permission expressions. */
-	static const uint64_t provide_permission_expressions = 0;
+/* DACS locks are attached to responses. */
+	static const uint64_t provide_permission_expressions = 1;
 	element_entry.dataType	= RSSL_DT_UINT;
 	element_entry.name	= RSSL_ENAME_PROV_PERM_EXP;
 	rc = rsslEncodeElementEntry (&it, &element_entry, &provide_permission_expressions);
@@ -1006,7 +1006,7 @@ hitsuji::client_t::SendDirectoryRefresh (
  *   SERVICE_DATA_FILTER  - Broadcast data.
  *   SERVICE_LINK_FILTER  - Load balance grouping.
  */
-	response.msgBase.msgKey.filter = filter_mask & (RDM_DIRECTORY_SERVICE_INFO_FILTER | RDM_DIRECTORY_SERVICE_STATE_FILTER);
+	response.msgBase.msgKey.filter = filter_mask & (RDM_DIRECTORY_SERVICE_INFO_FILTER | RDM_DIRECTORY_SERVICE_STATE_FILTER | RDM_DIRECTORY_SERVICE_LOAD_FILTER);
 /* Name:        Not used */
 /* NameType:    Not used */
 /* ServiceName: Not used */

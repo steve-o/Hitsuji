@@ -25,6 +25,7 @@
 
 #include "permdata.hh"
 #include "vta_bar.hh"
+#include "vta_rollup_bar.hh"
 #include "vta_test.hh"
 
 static const std::string kErrorMalformedRequest = "Malformed request.";
@@ -131,9 +132,17 @@ hitsuji::worker_t::Initialize (size_t id)
 		sbe_request_.reset (new hitsuji::Request());
 		sbe_reply_.reset (new hitsuji::Reply());
 		vta_bar_.reset (new vta::bar_t (prefix_));
+		vta_rollup_bar_.reset (new vta::rollup_bar_t (prefix_));
 		vta_test_.reset (new vta::test_t (prefix_));
-		if (!(bool)sbe_hdr_ || !(bool)sbe_request_ || !(bool)sbe_reply_ || !(bool)vta_bar_ || !(bool)vta_test_)
+		if (!(bool)sbe_hdr_ ||
+		    !(bool)sbe_request_ ||
+		    !(bool)sbe_reply_ ||
+		    !(bool)vta_bar_ ||
+		    !(bool)vta_rollup_bar_ ||
+		    !(bool)vta_test_)
+		{
 			goto cleanup;
+		}
 	} catch (const std::exception& e) {
 		LOG(ERROR) << prefix_ << "SBE::Initialisation exception: { "
 			"\"What\": \"" << e.what() << "\""
@@ -188,8 +197,7 @@ hitsuji::worker_t::OnTask (
 	using namespace boost::chrono;
 	auto t0 = high_resolution_clock::now();
 
-/* clear analytic state */
-	vta_bar_->Reset();
+/* Reset message buffer */
 	rssl_length_ = sizeof (rssl_buf_);
 /* decompose request */
 	url_parse::Parsed parsed;
@@ -219,106 +227,122 @@ hitsuji::worker_t::OnTask (
 		}
 		goto send_reply;
 	}
+	else
+	{
 /* require a NULL terminated string */
-	underlying_symbol_.assign (url_.c_str() + file_name.begin, file_name.len);
+		underlying_symbol_.assign (url_.c_str() + file_name.begin, file_name.len);
+/* select implementation */
+		auto analytic = static_pointer_cast<vta::intraday_t> (vta_bar_);
+		if (parsed.ref.is_valid())  {
+			chromium::StringPiece ref (url_.c_str() + parsed.ref.begin, parsed.ref.len);
+			if (0 == ref.compare ("test")) {
+				analytic = static_pointer_cast<vta::intraday_t> (vta_test_);
+			} else if (0 == ref.compare ("rollup")) {
+				analytic = static_pointer_cast<vta::intraday_t> (vta_rollup_bar_);
+			}
+		}
+/* clear analytic state */
+		analytic->Reset();
 #ifndef CONFIG_AS_APPLICATION
 /* Check SearchEngine.exe inventory */
-	if (0 == TBPrimitives::IsSymbolExists (underlying_symbol_.c_str())) {
-//		cumulative_stats_[CLIENT_PC_ITEM_NOT_FOUND]++;
-//		cumulative_stats_[CLIENT_PC_ITEM_REQUEST_REJECTED]++;
-		LOG(INFO) << prefix_ << "Closing request for unknown item \"" << underlying_symbol_ << "\".";
-		if (!provider_t::WriteRawClose (
-				rwf_version,
-				token,
-				service_id,
-				RSSL_DMT_MARKET_PRICE,
-				item_name,
-				use_attribinfo_in_updates,
-				RSSL_STREAM_CLOSED, RSSL_SC_NOT_FOUND, kErrorNotFound,
-				rssl_buf_,
-				&rssl_length_
-				))
+		if (0 == TBPrimitives::IsSymbolExists (underlying_symbol_.c_str())) 
 		{
-			return false;
+//			cumulative_stats_[CLIENT_PC_ITEM_NOT_FOUND]++;
+//			cumulative_stats_[CLIENT_PC_ITEM_REQUEST_REJECTED]++;
+			LOG(INFO) << prefix_ << "Closing request for unknown item \"" << underlying_symbol_ << "\".";
+			if (!provider_t::WriteRawClose (
+					rwf_version,
+					token,
+					service_id,
+					RSSL_DMT_MARKET_PRICE,
+					item_name,
+					use_attribinfo_in_updates,
+					RSSL_STREAM_CLOSED, RSSL_SC_NOT_FOUND, kErrorNotFound,
+					rssl_buf_,
+					&rssl_length_
+					))
+			{
+				return false;
+			}
+			goto send_reply;
 		}
-		goto send_reply;
-	}
 #endif
 /* Validate request, e.g. be satisifed with this SearchEngine instance */
-	if (parsed.query.is_valid() && !vta_bar_->ParseRequest (url_, parsed.query)) {
-		if (!provider_t::WriteRawClose (
-				rwf_version,
-				token,
-				service_id,
-				RSSL_DMT_MARKET_PRICE,
-				item_name,
-				use_attribinfo_in_updates,
-				RSSL_STREAM_CLOSED, RSSL_SC_NOT_FOUND, kErrorMalformedRequest,
-				rssl_buf_,
-				&rssl_length_
-				))
-		{
-			return false;
+		if (parsed.query.is_valid() && !analytic->ParseRequest (url_, parsed.query)) {
+			if (!provider_t::WriteRawClose (
+					rwf_version,
+					token,
+					service_id,
+					RSSL_DMT_MARKET_PRICE,
+					item_name,
+					use_attribinfo_in_updates,
+					RSSL_STREAM_CLOSED, RSSL_SC_NOT_FOUND, kErrorMalformedRequest,
+					rssl_buf_,
+					&rssl_length_
+					))
+			{
+				return false;
+			}
+			goto send_reply;
 		}
-		goto send_reply;
-	}
-	auto symbol_handle = TBPrimitives::GetSymbolHandle (underlying_symbol_.c_str(), 1);
+		auto symbol_handle = TBPrimitives::GetSymbolHandle (underlying_symbol_.c_str(), 0);
 /* Fetch DACS lock from PermData FlexRecord history: string is cleared. */
-//	if (!permdata_->GetDacsLock (underlying_symbol_, &dacs_lock_)) {
-	if (!permdata_->GetDacsLock (symbol_handle, work_area_.get(), view_element_.get(), &dacs_lock_)) {
-		if (!provider_t::WriteRawClose (
-				rwf_version,
-				token,
-				service_id,
-				RSSL_DMT_MARKET_PRICE,
-				item_name,
-				use_attribinfo_in_updates,
-				RSSL_STREAM_CLOSED, RSSL_SC_NOT_ENTITLED, kErrorPermData,
-				rssl_buf_,
-				&rssl_length_
-				))
-		{
-			return false;
+//		if (!permdata_->GetDacsLock (underlying_symbol_, &dacs_lock_)) {
+		if (!permdata_->GetDacsLock (symbol_handle, work_area_.get(), view_element_.get(), &dacs_lock_)) {
+			if (!provider_t::WriteRawClose (
+					rwf_version,
+					token,
+					service_id,
+					RSSL_DMT_MARKET_PRICE,
+					item_name,
+					use_attribinfo_in_updates,
+					RSSL_STREAM_CLOSED, RSSL_SC_NOT_ENTITLED, kErrorPermData,
+					rssl_buf_,
+					&rssl_length_
+					))
+			{
+				return false;
+			}
+			goto send_reply;
 		}
-		goto send_reply;
-	}
 /* Execute analytic */
-//	if (!vta_bar_->Calculate (underlying_symbol_)) {
-	if (!vta_bar_->Calculate (symbol_handle, work_area_.get(), view_element_.get())) {
-		if (!provider_t::WriteRawClose (
-				rwf_version,
-				token,
-				service_id,
-				RSSL_DMT_MARKET_PRICE,
-				item_name,
-				use_attribinfo_in_updates,
-				RSSL_STREAM_CLOSED_RECOVER, RSSL_SC_ERROR, kErrorInternal,
-				rssl_buf_,
-				&rssl_length_
-				))
-		{
-			return false;
+		if (!analytic->Calculate (underlying_symbol_)) {
+//		if (!analytic->Calculate (symbol_handle, work_area_.get(), view_element_.get())) {
+			if (!provider_t::WriteRawClose (
+					rwf_version,
+					token,
+					service_id,
+					RSSL_DMT_MARKET_PRICE,
+					item_name,
+					use_attribinfo_in_updates,
+					RSSL_STREAM_CLOSED_RECOVER, RSSL_SC_ERROR, kErrorInternal,
+					rssl_buf_,
+					&rssl_length_
+					))
+			{
+				return false;
+			}
+			goto send_reply;
 		}
-		goto send_reply;
-	}
 /* Response message with analytic payload */
-	if (!vta_bar_->WriteRaw (rwf_version, token, service_id, item_name, dacs_lock_, rssl_buf_, &rssl_length_)) {
+		if (!analytic->WriteRaw (rwf_version, token, service_id, item_name, dacs_lock_, rssl_buf_, &rssl_length_)) {
 /* Extremely unlikely situation that writing the response fails but writing a close will not */
-		if (!provider_t::WriteRawClose (
-				rwf_version,
-				token,
-				service_id,
-				RSSL_DMT_MARKET_PRICE,
-				item_name,
-				use_attribinfo_in_updates,
-				RSSL_STREAM_CLOSED_RECOVER, RSSL_SC_ERROR, kErrorInternal,
-				rssl_buf_,
-				&rssl_length_
-				))
-		{
-			return false;
+			if (!provider_t::WriteRawClose (
+					rwf_version,
+					token,
+					service_id,
+					RSSL_DMT_MARKET_PRICE,
+					item_name,
+					use_attribinfo_in_updates,
+					RSSL_STREAM_CLOSED_RECOVER, RSSL_SC_ERROR, kErrorInternal,
+					rssl_buf_,
+					&rssl_length_
+					))
+			{
+				return false;
+			}
+			goto send_reply;
 		}
-		goto send_reply;
 	}
 
 send_reply:

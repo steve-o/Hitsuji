@@ -155,16 +155,18 @@ hitsuji::client_t::Close()
  */
 bool
 hitsuji::client_t::OnMsg (
+	RsslDecodeIterator* it,
 	const RsslMsg* msg
 	)
 {
+	DCHECK (nullptr != it);
 	DCHECK (nullptr != msg);
 	cumulative_stats_[CLIENT_PC_RSSL_MSGS_RECEIVED]++;
 	switch (msg->msgBase.msgClass) {
 	case RSSL_MC_REQUEST:
-		return OnRequestMsg (reinterpret_cast<const RsslRequestMsg*> (msg));
+		return OnRequestMsg (it, reinterpret_cast<const RsslRequestMsg*> (msg));
 	case RSSL_MC_CLOSE:
-		return OnCloseMsg (reinterpret_cast<const RsslCloseMsg*> (msg));
+		return OnCloseMsg (it, reinterpret_cast<const RsslCloseMsg*> (msg));
 	case RSSL_MC_REFRESH:
 	case RSSL_MC_STATUS:
 	case RSSL_MC_UPDATE:
@@ -190,6 +192,7 @@ hitsuji::client_t::OnMsg (
  */
 bool
 hitsuji::client_t::OnRequestMsg (
+	RsslDecodeIterator* it,
 	const RsslRequestMsg* request_msg
 	)
 {
@@ -197,13 +200,13 @@ hitsuji::client_t::OnRequestMsg (
 	cumulative_stats_[CLIENT_PC_REQUEST_MSGS_RECEIVED]++;
 	switch (request_msg->msgBase.domainType) {
 	case RSSL_DMT_LOGIN:
-		return OnLoginRequest (request_msg);
+		return OnLoginRequest (it, request_msg);
 	case RSSL_DMT_SOURCE:	/* Directory */
-		return OnDirectoryRequest (request_msg);
+		return OnDirectoryRequest (it, request_msg);
 	case RSSL_DMT_DICTIONARY:
-		return OnDictionaryRequest (request_msg);
+		return OnDictionaryRequest (it, request_msg);
 	case RSSL_DMT_MARKET_PRICE:
-		return OnItemRequest (request_msg);
+		return OnItemRequest (it, request_msg);
 	case RSSL_DMT_MARKET_BY_ORDER:
 	case RSSL_DMT_MARKET_BY_PRICE:
 	case RSSL_DMT_MARKET_MAKER:
@@ -245,6 +248,7 @@ hitsuji::client_t::OnRequestMsg (
  */
 bool
 hitsuji::client_t::OnLoginRequest (
+	RsslDecodeIterator* it,
 	const RsslRequestMsg* login_msg
 	)
 {
@@ -278,21 +282,82 @@ hitsuji::client_t::OnLoginRequest (
 		|| !has_name
 		|| !has_nametype)
 	{
-		cumulative_stats_[CLIENT_PC_MMT_LOGIN_MALFORMED]++;
-		LOG(WARNING) << prefix_ << "Rejecting MMT_LOGIN as RDM validation failed: " << login_msg;
-		return RejectLogin (login_msg, login_msg->msgBase.streamId);
+		goto invalid_login;
 	}
-	else
-	{
-		if (!AcceptLogin (login_msg, login_msg->msgBase.streamId)) {
-/* disconnect on failure. */
-			return false;
-		} else {
-			is_logged_in_ = true;
-			login_token_ = login_msg->msgBase.streamId;
+
+/* Extract application details from payload */
+	if (has_attribinfo) {
+		RsslRet rc = rsslDecodeMsgKeyAttrib (it, &login_msg->msgBase.msgKey);
+		if (RSSL_RET_SUCCESS != rc) {
+			LOG(WARNING) << prefix_ << "rsslDecodeMsgKeyAttrib: { "
+				  "\"returnCode\": " << static_cast<signed> (rc) << ""
+				", \"enumeration\": \"" << rsslRetCodeToString (rc) << "\""
+				", \"text\": \"" << rsslRetCodeInfo (rc) << "\""
+				" }";
+			goto invalid_login;
+		}
+		if (RSSL_DT_ELEMENT_LIST != login_msg->msgBase.msgKey.attribContainerType) {
+			LOG(WARNING) << prefix_ << "AttribInfo container type is not an element list.";
+		} else if (!OnLoginPayload (it)) {
+			goto invalid_login;
 		}
 	}
 
+	if (!AcceptLogin (login_msg, login_msg->msgBase.streamId)) {
+/* disconnect on failure. */
+		return false;
+	} else {
+		is_logged_in_ = true;
+		login_token_ = login_msg->msgBase.streamId;
+	}
+	return true;
+invalid_login:
+	cumulative_stats_[CLIENT_PC_MMT_LOGIN_MALFORMED]++;
+	LOG(WARNING) << prefix_ << "Rejecting MMT_LOGIN as RDM validation failed: " << login_msg;
+	return RejectLogin (login_msg, login_msg->msgBase.streamId);
+}
+
+bool
+hitsuji::client_t::OnLoginPayload (
+	RsslDecodeIterator*const it
+	)
+{
+	DCHECK (nullptr != it);
+
+	RsslElementList	element_list;
+	RsslElementEntry element;
+	RsslRet rc;
+
+	rc = rsslDecodeElementList (it, &element_list, nullptr /* no dictionary */);
+	if (RSSL_RET_SUCCESS != rc) {
+		LOG(ERROR) << prefix_ << "rsslDecodeElementList: { "
+			  "\"returnCode\": " << static_cast<signed> (rc) << ""
+			", \"enumeration\": \"" << rsslRetCodeToString (rc) << "\""
+			", \"text\": \"" << rsslRetCodeInfo (rc) << "\""
+			" }";
+		return false;
+	}
+	do {
+		rc = rsslDecodeElementEntry (it, &element);
+		switch (rc) {
+		case RSSL_RET_END_OF_CONTAINER:
+			break;
+		case RSSL_RET_SUCCESS:
+/* ApplicationName */
+			if (rsslBufferIsEqual (&element.name, &RSSL_ENAME_APPNAME)) {
+				chromium::StringPiece application_name (element.name.data, element.name.length);
+				LOG(INFO) << prefix_ << "ApplicationName: \"" << application_name << "\"";
+			}
+			break;
+		default:
+			LOG(ERROR) << prefix_ << "rsslDecodeElementEntry: { "
+				  "\"returnCode\": " << static_cast<signed> (rc) << ""
+				", \"enumeration\": \"" << rsslRetCodeToString (rc) << "\""
+				", \"text\": \"" << rsslRetCodeInfo (rc) << "\""
+				" }";
+			return false;
+		}
+	} while (RSSL_RET_SUCCESS == rc);
 	return true;
 }
 
@@ -676,6 +741,7 @@ cleanup:
  */
 bool
 hitsuji::client_t::OnDirectoryRequest (
+	RsslDecodeIterator* it,
 	const RsslRequestMsg* request_msg
 	)
 {
@@ -723,6 +789,7 @@ hitsuji::client_t::OnDirectoryRequest (
 
 bool
 hitsuji::client_t::OnDictionaryRequest (
+	RsslDecodeIterator* it,
 	const RsslRequestMsg* request_msg
 	)
 {
@@ -743,6 +810,7 @@ hitsuji::client_t::OnDictionaryRequest (
 
 bool
 hitsuji::client_t::OnItemRequest (
+	RsslDecodeIterator* it,
 	const RsslRequestMsg* request_msg
 	)
 {
@@ -810,8 +878,8 @@ hitsuji::client_t::OnItemRequest (
 	} else {
 		cumulative_stats_[CLIENT_PC_ITEM_SNAPSHOT_REQUEST_RECEIVED]++;
 	}
-	const auto it = tokens_.find (request_token);
-	if (it != tokens_.end()) {
+	const auto jt = tokens_.find (request_token);
+	if (jt != tokens_.end()) {
 		cumulative_stats_[CLIENT_PC_ITEM_REISSUE_REQUEST_RECEIVED]++;
 /* Explicitly ignore reissue as it does not alter response data. */
 		return true;
@@ -872,6 +940,7 @@ cleanup:
 
 bool
 hitsuji::client_t::OnCloseMsg (
+	RsslDecodeIterator* it,
 	const RsslCloseMsg* close_msg
 	)
 {

@@ -115,15 +115,15 @@ namespace hitsuji
 		}
 
 	private:
-		bool OnMsg (const RsslMsg* msg);
+		bool OnMsg (RsslDecodeIterator* it, const RsslMsg* msg);
+		bool OnRequestMsg (RsslDecodeIterator* it, const RsslRequestMsg* msg);
+		bool OnLoginRequest (RsslDecodeIterator* it, const RsslRequestMsg* msg);
+		bool OnLoginPayload (RsslDecodeIterator* it);
+		bool OnDirectoryRequest (RsslDecodeIterator* it, const RsslRequestMsg* msg);
+		bool OnDictionaryRequest (RsslDecodeIterator* it, const RsslRequestMsg* msg);
+		bool OnItemRequest (RsslDecodeIterator* it, const RsslRequestMsg* msg);
 
-		bool OnRequestMsg (const RsslRequestMsg* msg);
-		bool OnLoginRequest (const RsslRequestMsg* msg);
-		bool OnDirectoryRequest (const RsslRequestMsg* msg);
-		bool OnDictionaryRequest (const RsslRequestMsg* msg);
-		bool OnItemRequest (const RsslRequestMsg* msg);
-
-		bool OnCloseMsg (const RsslCloseMsg* msg);
+		bool OnCloseMsg (RsslDecodeIterator* it, const RsslCloseMsg* msg);
 		bool OnItemClose (const RsslCloseMsg* msg);
 
 		bool RejectLogin (const RsslRequestMsg* msg, int32_t login_token);

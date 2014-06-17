@@ -996,7 +996,7 @@ hitsuji::provider_t::OnMsg (
 		}
 		DCHECK (nullptr != handle->userSpecPtr);
 		auto client = reinterpret_cast<client_t*> (handle->userSpecPtr);
-		if (!client->OnMsg (&msg))
+		if (!client->OnMsg (&it, &msg))
 			Abort (handle);
 	}
 }

@@ -11,6 +11,10 @@
             <type name="schemaId" primitiveType="uint16"/>
             <type name="version" primitiveType="uint16"/>
         </composite>
+        <composite name="groupSizeEncoding" description="Repeating group dimensions">
+            <type name="blockLength" primitiveType="uint16"/>
+            <type name="numInGroup" primitiveType="uint8"/>
+        </composite>
         <composite name="varDataEncoding">
             <type name="length" primitiveType="uint8"/>
             <type name="varData" primitiveType="uint8" length="0" characterEncoding="UTF-8"/>
@@ -28,7 +32,10 @@
         <field name="token" id="3" type="int32"/>
         <field name="serviceId" id="4" type="uint16"/>
         <field name="flags" id="5" type="Flags"/>
-        <data name="itemName" id="6" type="varDataEncoding"/>
+	<group name="view" id="6" dimensionType="groupSizeEncoding">
+            <field name="fid" id="7" type="int16"/>
+	</group>
+        <data name="itemName" id="8" type="varDataEncoding"/>
     </message>
     <message name="Reply" id="2" description="Rssl reply from worker thread">
         <field name="handle" id="1" type="uint64"/>

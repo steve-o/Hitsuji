@@ -7,6 +7,7 @@
 #include "sbe/sbe.hpp"
 
 #include "hitsuji/VarDataEncoding.hpp"
+#include "hitsuji/GroupSizeEncoding.hpp"
 #include "hitsuji/Flags.hpp"
 
 using namespace sbe;
@@ -364,6 +365,162 @@ public:
         return flags_;
     }
 
+    class View
+    {
+    private:
+        char *buffer_;
+        int bufferLength_;
+        int *positionPtr_;
+        int blockLength_;
+        int count_;
+        int index_;
+        int offset_;
+        int actingVersion_;
+        GroupSizeEncoding dimensions_;
+
+    public:
+
+        void wrapForDecode(char *buffer, int *pos, const int actingVersion, const int bufferLength)
+        {
+            buffer_ = buffer;
+            bufferLength_ = bufferLength;
+            dimensions_.wrap(buffer_, *pos, actingVersion, bufferLength);
+            count_ = dimensions_.numInGroup();
+            blockLength_ = dimensions_.blockLength();
+            index_ = -1;
+            actingVersion_ = actingVersion;
+            positionPtr_ = pos;
+            *positionPtr_ = *positionPtr_ + 3;
+        }
+
+        void wrapForEncode(char *buffer, const int count,
+                           int *pos, const int actingVersion, const int bufferLength)
+        {
+            buffer_ = buffer;
+            bufferLength_ = bufferLength;
+            dimensions_.wrap(buffer_, *pos, actingVersion, bufferLength);
+            dimensions_.numInGroup((sbe_uint8_t)count);
+            dimensions_.blockLength((sbe_uint16_t)2);
+            index_ = -1;
+            count_ = count;
+            blockLength_ = 2;
+            actingVersion_ = actingVersion;
+            positionPtr_ = pos;
+            *positionPtr_ = *positionPtr_ + 3;
+        }
+
+        static int sbeHeaderSize()
+        {
+            return 3;
+        }
+
+        static int sbeBlockLength()
+        {
+            return 2;
+        }
+
+        int count(void) const
+        {
+            return count_;
+        }
+
+        bool hasNext(void) const
+        {
+            return index_ + 1 < count_;
+        }
+
+        View &next(void)
+        {
+            offset_ = *positionPtr_;
+            if (SBE_BOUNDS_CHECK_EXPECT(( (offset_ + blockLength_) >= bufferLength_ ),0))
+            {
+                throw "buffer too short to support next group index";
+            }
+            *positionPtr_ = offset_ + blockLength_;
+            ++index_;
+
+            return *this;
+        }
+
+
+        static int fidId(void)
+        {
+            return 7;
+        }
+
+        static int fidSinceVersion(void)
+        {
+             return 0;
+        }
+
+        bool fidInActingVersion(void)
+        {
+            return (actingVersion_ >= 0) ? true : false;
+        }
+
+
+        static const char *fidMetaAttribute(const MetaAttribute::Attribute metaAttribute)
+        {
+            switch (metaAttribute)
+            {
+                case MetaAttribute::EPOCH: return "unix";
+                case MetaAttribute::TIME_UNIT: return "nanosecond";
+                case MetaAttribute::SEMANTIC_TYPE: return "";
+            }
+
+            return "";
+        }
+
+        static sbe_int16_t fidNullValue()
+        {
+            return (sbe_int16_t)-32768;
+        }
+
+        static sbe_int16_t fidMinValue()
+        {
+            return (sbe_int16_t)-32767;
+        }
+
+        static sbe_int16_t fidMaxValue()
+        {
+            return (sbe_int16_t)32767;
+        }
+
+        sbe_int16_t fid(void) const
+        {
+            return SBE_LITTLE_ENDIAN_ENCODE_16(*((sbe_int16_t *)(buffer_ + offset_ + 0)));
+        }
+
+        View &fid(const sbe_int16_t value)
+        {
+            *((sbe_int16_t *)(buffer_ + offset_ + 0)) = SBE_LITTLE_ENDIAN_ENCODE_16(value);
+            return *this;
+        }
+    };
+
+private:
+    View view_;
+
+public:
+
+    static int viewId(void)
+    {
+        return 6;
+    }
+
+
+    View &view(void)
+    {
+        view_.wrapForDecode(buffer_, positionPtr_, actingVersion_, bufferLength_);
+        return view_;
+    }
+
+    View &viewCount(const int count)
+    {
+        view_.wrapForEncode(buffer_, count, positionPtr_, actingVersion_, bufferLength_);
+        return view_;
+    }
+
     static const char *itemNameMetaAttribute(const MetaAttribute::Attribute metaAttribute)
     {
         switch (metaAttribute)
@@ -393,7 +550,7 @@ public:
 
     static int itemNameId(void)
     {
-        return 6;
+        return 8;
     }
 
 

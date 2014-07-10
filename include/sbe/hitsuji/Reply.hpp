@@ -7,6 +7,7 @@
 #include "sbe/sbe.hpp"
 
 #include "hitsuji/VarDataEncoding.hpp"
+#include "hitsuji/GroupSizeEncoding.hpp"
 #include "hitsuji/Flags.hpp"
 
 using namespace sbe;

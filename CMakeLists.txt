@@ -37,6 +37,7 @@ else (CMAKE_BUILD_TYPE STREQUAL "Debug")
 	set(VHAYU_BUILD_TYPE "release")
 endif (CMAKE_BUILD_TYPE STREQUAL "Debug")
 set(VHAYU_ROOT D:/Vhayu-7.0.5)
+set(VHAYU_ROOT D:/Vhayu-7.1.4)
 set(VHAYU_INCLUDE_DIRS
 	${VHAYU_ROOT}/Engine/TBSDK/Include
 	${VHAYU_ROOT}/Engine/ThirdParty/xerces-c-3.1.1-x86_64-windows-vc-10.0/include
@@ -243,6 +244,7 @@ set(cxx-sources
 	src/upa.cc
 	src/upaostream.cc
 	src/vta_bar.cc
+	src/vta_close.cc
 	src/vta_rollup_bar.cc
 	src/vta_test.cc
 	src/worker.cc
@@ -317,7 +319,6 @@ if(CONFIG_AS_APPLICATION)
 	)
 	set(config
 		${CMAKE_CURRENT_SOURCE_DIR}/config/Hitsuji.json
-		${CMAKE_CURRENT_SOURCE_DIR}/config/example.reg
 		"${CMAKE_CURRENT_SOURCE_DIR}/config/Sawbuck ETW provider.reg"
 	)
 else(CONFIG_AS_APPLICATION)
@@ -334,7 +335,6 @@ else(CONFIG_AS_APPLICATION)
 	)
 	set(config
 		${CMAKE_CURRENT_SOURCE_DIR}/config/Hitsuji.xml
-		${CMAKE_CURRENT_SOURCE_DIR}/config/example.reg
 		"${CMAKE_CURRENT_SOURCE_DIR}/config/Sawbuck ETW provider.reg"
 	)
 endif(CONFIG_AS_APPLICATION)

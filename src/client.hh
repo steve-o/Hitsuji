@@ -81,6 +81,7 @@ namespace hitsuji
 		    Delegate() {}
 
 		    virtual bool OnRequest (uintptr_t handle, uint16_t rwf_version, int32_t token, uint16_t service_id, const std::string& item_name, bool use_attribinfo_in_updates) = 0;
+		    virtual bool OnRequest (uintptr_t handle, uint16_t rwf_version, int32_t token, uint16_t service_id, const std::string& item_name, bool use_attribinfo_in_updates, const std::vector<int_fast16_t>& view_by_fid) = 0;
 /* TBD */
 //		    virtual bool OnCancel (uintptr_t handle, uint16_t rwf_version, int32_t token, uint16_t service_id, const std::string& item_name, bool use_attribinfo_in_updates) = 0;
 
@@ -118,10 +119,11 @@ namespace hitsuji
 		bool OnMsg (RsslDecodeIterator* it, const RsslMsg* msg);
 		bool OnRequestMsg (RsslDecodeIterator* it, const RsslRequestMsg* msg);
 		bool OnLoginRequest (RsslDecodeIterator* it, const RsslRequestMsg* msg);
-		bool OnLoginPayload (RsslDecodeIterator* it);
+		bool OnLoginAttribInfo (RsslDecodeIterator* it);
 		bool OnDirectoryRequest (RsslDecodeIterator* it, const RsslRequestMsg* msg);
 		bool OnDictionaryRequest (RsslDecodeIterator* it, const RsslRequestMsg* msg);
 		bool OnItemRequest (RsslDecodeIterator* it, const RsslRequestMsg* msg);
+		bool ParseView (RsslDecodeIterator* it, const RsslMsg* msg, std::vector<int_fast16_t>* view_by_fid);
 
 		bool OnCloseMsg (RsslDecodeIterator* it, const RsslCloseMsg* msg);
 		bool OnItemClose (const RsslCloseMsg* msg);

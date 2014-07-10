@@ -26,6 +26,7 @@
 namespace vta
 {
 	class bar_t;
+	class close_t;
 	class rollup_bar_t;
 	class test_t;
 }
@@ -94,6 +95,7 @@ namespace hitsuji
 /* Analytics */
 		std::shared_ptr<vta::bar_t> vta_bar_;
 		std::shared_ptr<vta::rollup_bar_t> vta_rollup_bar_;
+		std::shared_ptr<vta::close_t> vta_close_;
 		std::shared_ptr<vta::test_t> vta_test_;
 
 		chromium::debug::LeakTracker<worker_t> leak_tracker_;

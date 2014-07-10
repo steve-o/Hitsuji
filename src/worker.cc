@@ -25,6 +25,7 @@
 
 #include "permdata.hh"
 #include "vta_bar.hh"
+#include "vta_close.hh"
 #include "vta_rollup_bar.hh"
 #include "vta_test.hh"
 
@@ -133,12 +134,14 @@ hitsuji::worker_t::Initialize (size_t id)
 		sbe_reply_.reset (new hitsuji::Reply());
 		vta_bar_.reset (new vta::bar_t (prefix_));
 		vta_rollup_bar_.reset (new vta::rollup_bar_t (prefix_));
+		vta_close_.reset (new vta::close_t (prefix_));
 		vta_test_.reset (new vta::test_t (prefix_));
 		if (!(bool)sbe_hdr_ ||
 		    !(bool)sbe_request_ ||
 		    !(bool)sbe_reply_ ||
 		    !(bool)vta_bar_ ||
 		    !(bool)vta_rollup_bar_ ||
+		    !(bool)vta_close_ ||
 		    !(bool)vta_test_)
 		{
 			goto cleanup;
@@ -239,6 +242,8 @@ hitsuji::worker_t::OnTask (
 				analytic = static_pointer_cast<vta::intraday_t> (vta_test_);
 			} else if (0 == ref.compare ("rollup")) {
 				analytic = static_pointer_cast<vta::intraday_t> (vta_rollup_bar_);
+			} else if (0 == ref.compare ("close")) {
+				analytic = static_pointer_cast<vta::intraday_t> (vta_close_);
 			}
 		}
 /* clear analytic state */

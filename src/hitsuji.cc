@@ -319,6 +319,62 @@ hitsuji::hitsuji_t::OnRequest (
 }
 
 bool
+hitsuji::hitsuji_t::OnRequest (
+	uintptr_t handle,
+	uint16_t rwf_version, 
+	int32_t token,
+	uint16_t service_id,
+	const std::string& item_name,
+	bool use_attribinfo_in_updates,
+	const std::vector<int_fast16_t>& view_by_fid
+	)
+{
+	DVLOG(3) << "Request: { "
+		  "\"handle\": " << handle << ""
+		", \"rwf_version\": " << rwf_version << ""
+		", \"token\": " << token << ""
+		", \"service_id\": " << service_id << ""
+		", \"item_name\": \"" << item_name << "\""
+		", \"use_attribinfo_in_updates\": " << (use_attribinfo_in_updates ? "true" : "false") << ""
+		", \"view_by_fid\": []"
+		" }";
+/* distribute to worker */
+	static const int version = 0;
+	int rc = zmq_msg_init_size (&zmq_msg_, MessageHeader::size() + Request::sbeBlockLength() + Request::itemNameHeaderSize() + item_name.size());
+	if (rc) {
+		LOG(ERROR) << "zmq_msg_init_size failed: " << zmq_strerror (zmq_errno());
+		return false;
+	}
+	sbe_hdr_->wrap (reinterpret_cast<char*> (zmq_msg_data (&zmq_msg_)), 0, version, static_cast<int> (zmq_msg_size (&zmq_msg_)))
+		.blockLength (Request::sbeBlockLength())
+		.templateId (Request::sbeTemplateId())
+		.schemaId (Request::sbeSchemaId())
+		.version (Request::sbeSchemaVersion());
+	sbe_request_->wrapForEncode (reinterpret_cast<char*> (zmq_msg_data (&zmq_msg_)), sbe_hdr_->size(), static_cast<int> (zmq_msg_size (&zmq_msg_)))
+		.handle (handle)
+		.rwfVersion (rwf_version)
+		.token (token)
+		.serviceId (service_id);
+	sbe_request_->flags().clear()
+		.abort (false)
+		.useAttribInfoInUpdates (use_attribinfo_in_updates);
+	Request::View &view = sbe_request_->viewCount (static_cast<int> (view_by_fid.size()));
+	for (auto it = view_by_fid.begin(); it != view_by_fid.end(); ++it) {
+		view.next().fid (*it);
+	}
+	sbe_request_->putItemName (item_name.c_str(), static_cast<int> (item_name.size()));
+	LOG(INFO) << "Distributing task \"" << item_name << "\" to worker pool.";
+	rc = zmq_msg_send (&zmq_msg_, worker_request_sock_.get(), 0);
+	if (-1 == rc) {
+		LOG(ERROR) << "zmq_send failed: " << zmq_strerror (zmq_errno());
+		rc = zmq_msg_close (&zmq_msg_);
+		LOG_IF(ERROR, rc) << "zmq_msg_close failed: " << zmq_strerror (zmq_errno());
+		return false;
+	}
+	return true;
+}
+
+bool
 hitsuji::hitsuji_t::OnReply (
 	const void* buffer,
 	size_t length

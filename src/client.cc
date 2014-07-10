@@ -298,7 +298,7 @@ hitsuji::client_t::OnLoginRequest (
 		}
 		if (RSSL_DT_ELEMENT_LIST != login_msg->msgBase.msgKey.attribContainerType) {
 			LOG(WARNING) << prefix_ << "AttribInfo container type is not an element list.";
-		} else if (!OnLoginPayload (it)) {
+		} else if (!OnLoginAttribInfo (it)) {
 			goto invalid_login;
 		}
 	}
@@ -318,7 +318,7 @@ invalid_login:
 }
 
 bool
-hitsuji::client_t::OnLoginPayload (
+hitsuji::client_t::OnLoginAttribInfo (
 	RsslDecodeIterator*const it
 	)
 {
@@ -345,8 +345,12 @@ hitsuji::client_t::OnLoginPayload (
 		case RSSL_RET_SUCCESS:
 /* ApplicationName */
 			if (rsslBufferIsEqual (&element.name, &RSSL_ENAME_APPNAME)) {
-				chromium::StringPiece application_name (element.name.data, element.name.length);
-				LOG(INFO) << prefix_ << "ApplicationName: \"" << application_name << "\"";
+				if (RSSL_DT_ASCII_STRING == element.dataType) {
+					chromium::StringPiece application_name (element.encData.data, element.encData.length);
+					LOG(INFO) << prefix_ << "ApplicationName: \"" << application_name << "\"";
+				} else {
+					LOG(WARNING) << prefix_ << "RSSL_ENAME_APPNAME found in element list but entry data type is not RSSL_DT_ASCII_STRING.";
+				}
 			}
 			break;
 		default:
@@ -831,7 +835,8 @@ hitsuji::client_t::OnItemRequest (
 	const uint16_t service_id    = request_msg->msgBase.msgKey.serviceId;
 	const uint8_t  model_type    = request_msg->msgBase.domainType;
 	const std::string item_name (request_msg->msgBase.msgKey.name.data, request_msg->msgBase.msgKey.name.length);
-	const bool use_attribinfo_in_updates = (0 != (request_msg->flags & RSSL_RQMF_MSG_KEY_IN_UPDATES));
+	const bool use_attribinfo_in_updates = !!(request_msg->flags & RSSL_RQMF_MSG_KEY_IN_UPDATES);
+	const bool has_view = !!(request_msg->flags & RSSL_RQMF_HAS_VIEW);
 
 /* 7.4.3.2 Request Tokens
  * Providers should not attempt to submit data after the provider has received a close request for an item. */
@@ -886,7 +891,80 @@ hitsuji::client_t::OnItemRequest (
 	} else {
 		tokens_.emplace (request_token);
 	}
+/* Extract view field ids */
+	if (has_view) {
+		if (RSSL_DT_ELEMENT_LIST == request_msg->msgBase.containerType) {
+			std::vector<int_fast16_t> view_by_fid;
+			if (ParseView (it, reinterpret_cast<const RsslMsg*> (request_msg), &view_by_fid))
+				return delegate_->OnRequest (
+						    reinterpret_cast<uintptr_t> (handle_),
+						    rwf_version(),
+						    request_token,
+						    service_id,
+						    item_name,
+						    use_attribinfo_in_updates,
+						    view_by_fid
+						    );
+		}
+		LOG(WARNING) << prefix_ << "RSSL_RQMF_HAS_VIEW set but container type is not RSSL_DT_ELEMENT_LIST.";
+	}
 	return delegate_->OnRequest (reinterpret_cast<uintptr_t> (handle_), rwf_version(), request_token, service_id, item_name, use_attribinfo_in_updates);
+}
+
+bool
+hitsuji::client_t::ParseView (
+	RsslDecodeIterator* it,
+	const RsslMsg* msg,
+	std::vector<int_fast16_t>* view_by_fid
+	)
+{
+	RsslElementList	element_list;
+	RsslElementEntry element;
+	RsslRet rc;
+
+	rc = rsslDecodeElementList (it, &element_list, nullptr /* dictionary */);
+	if (RSSL_RET_SUCCESS != rc) {
+		LOG(WARNING) << prefix_ << "rsslDecodeElementList: { "
+			  "\"returnCode\": " << static_cast<signed> (rc) << ""
+			", \"enumeration\": \"" << rsslRetCodeToString (rc) << "\""
+			", \"text\": \"" << rsslRetCodeInfo (rc) << "\""
+			" }";
+		return false;
+	}
+
+	RsslUInt viewType;
+	do {
+		rc = rsslDecodeElementEntry (it, &element);
+		switch (rc) {
+		case RSSL_RET_END_OF_CONTAINER:
+			break;
+		case RSSL_RET_SUCCESS:
+			if (rsslBufferIsEqual (&element.name, &RSSL_ENAME_VIEW_TYPE)) {
+				if (RSSL_DT_UINT == element.dataType) {					
+					rc = rsslDecodeUInt (it, &viewType);
+					if (RSSL_RET_SUCCESS != rc) {
+						LOG(WARNING) << prefix_ << "rsslDecodeUInt: { "
+							  "\"returnCode\": " << static_cast<signed> (rc) << ""
+							", \"enumeration\": \"" << rsslRetCodeToString (rc) << "\""
+							", \"text\": \"" << rsslRetCodeInfo (rc) << "\""
+							" }";
+						return false;
+					}
+				} else {
+					LOG(WARNING) << prefix_ << "RSSL_ENAME_VIEW_TYPE found in element list but entry data type is not RSSL_DT_UINT.";
+				}
+			}
+			break;
+		default:
+			LOG(WARNING) << prefix_ << "rsslDecodeElementEntry: { "
+				  "\"returnCode\": " << static_cast<signed> (rc) << ""
+				", \"enumeration\": \"" << rsslRetCodeToString (rc) << "\""
+				", \"text\": \"" << rsslRetCodeInfo (rc) << "\""
+				" }";
+			return false;
+		}
+	} while (RSSL_RET_SUCCESS == rc);
+	return false;
 }
 
 bool

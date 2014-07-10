@@ -77,6 +77,7 @@ namespace hitsuji
 		void Quit();
 #endif
 		virtual bool OnRequest (uintptr_t handle, uint16_t rwf_version, int32_t token, uint16_t service_id, const std::string& item_name, bool use_attribinfo_in_updates) override;
+		virtual bool OnRequest (uintptr_t handle, uint16_t rwf_version, int32_t token, uint16_t service_id, const std::string& item_name, bool use_attribinfo_in_updates, const std::vector<int_fast16_t>& view_by_fid) override;
 		virtual bool OnRead() override;
 
 		bool Initialize();
